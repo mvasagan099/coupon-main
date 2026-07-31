@@ -130,7 +130,7 @@ BEGIN
   SELECT price, company_id, expiry_date
     INTO v_real_price, v_company_id, v_expiry_date
   FROM gift_cards
-  WHERE id = p_gift_card_id AND is_active = true;
+  WHERE id = p_gift_card_id;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Gift card not found or inactive';

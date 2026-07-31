@@ -1160,28 +1160,6 @@ export default function UserDashboard() {
               </div>
             </div>
 
-            <div className="glass-card-strong" style={{ padding: '1rem', borderRadius: '16px', display: 'grid', gap: '0.6rem' }}>
-              <div>
-                <label className="label">Name on payment</label>
-                <input
-                  className="input"
-                  value={mockPaymentForm.name}
-                  onChange={(event) => setMockPaymentForm({ ...mockPaymentForm, name: event.target.value })}
-                />
-              </div>
-              <div>
-                <label className="label">Payment method</label>
-                <select
-                  className="input"
-                  value={mockPaymentForm.method}
-                  onChange={(event) => setMockPaymentForm({ ...mockPaymentForm, method: event.target.value })}
-                >
-                  <option>Card ending 4242</option>
-                  <option>UPI demo handle</option>
-                  <option>Netbanking sandbox</option>
-                </select>
-              </div>
-            </div>
 
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
               <div style={{ flex: 1, padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.03)', borderRadius: '14px' }}>
