@@ -79,10 +79,7 @@ export default function UserDashboard() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [activeVoucher, setActiveVoucher] = useState<Coupon | null>(null);
   const [visibleCodes, setVisibleCodes] = useState<Record<string, boolean>>({});
-  const [mockPaymentForm, setMockPaymentForm] = useState({
-    name: 'Demo Customer',
-    method: 'Card ending 4242',
-  });
+
 
   useEffect(() => {
     if (!section) {
