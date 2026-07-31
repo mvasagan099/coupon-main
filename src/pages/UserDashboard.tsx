@@ -73,6 +73,8 @@ export default function UserDashboard() {
   const [cardsPage, setCardsPage] = useState(1);
   const [vouchersTab, setVouchersTab] = useState<'unused' | 'used'>('unused');
   const ITEMS_PER_PAGE = 5;
+  const CARDS_PER_PAGE = 6;
+  const MARKETPLACE_PER_PAGE = 6;
 
   const [selectedProduct, setSelectedProduct] = useState<GiftCard | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -370,20 +372,20 @@ export default function UserDashboard() {
     activityPage * ITEMS_PER_PAGE
   );
 
-  const totalMarketplacePages = Math.ceil(filteredCatalog.length / ITEMS_PER_PAGE);
+  const totalMarketplacePages = Math.ceil(filteredCatalog.length / MARKETPLACE_PER_PAGE);
   const slicedMarketplace = filteredCatalog.slice(
-    (marketplacePage - 1) * ITEMS_PER_PAGE,
-    marketplacePage * ITEMS_PER_PAGE
+    (marketplacePage - 1) * MARKETPLACE_PER_PAGE,
+    marketplacePage * MARKETPLACE_PER_PAGE
   );
 
   const activeVouchersList = userVouchers.filter(v => v.status !== 'redeemed' && !v.is_used);
   const redeemedVouchersList = userVouchers.filter(v => v.status === 'redeemed' || v.is_used);
 
   const selectedCardsList = vouchersTab === 'unused' ? activeVouchersList : redeemedVouchersList;
-  const totalCardsPages = Math.ceil(selectedCardsList.length / ITEMS_PER_PAGE);
+  const totalCardsPages = Math.ceil(selectedCardsList.length / CARDS_PER_PAGE);
   const slicedCards = selectedCardsList.slice(
-    (cardsPage - 1) * ITEMS_PER_PAGE,
-    cardsPage * ITEMS_PER_PAGE
+    (cardsPage - 1) * CARDS_PER_PAGE,
+    cardsPage * CARDS_PER_PAGE
   );
   const activeVoucherCount = activeVouchersList.length;
   const usedVoucherCount = redeemedVouchersList.length;
@@ -517,7 +519,7 @@ export default function UserDashboard() {
               {totalMarketplacePages > 1 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', padding: '0 0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
-                    Showing {(marketplacePage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(filteredCatalog.length, marketplacePage * ITEMS_PER_PAGE)} of {filteredCatalog.length}
+                    Showing {(marketplacePage - 1) * MARKETPLACE_PER_PAGE + 1} - {Math.min(filteredCatalog.length, marketplacePage * MARKETPLACE_PER_PAGE)} of {filteredCatalog.length}
                   </span>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
@@ -1024,7 +1026,7 @@ export default function UserDashboard() {
               {totalCardsPages > 1 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', padding: '0 0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
-                    Showing {(cardsPage - 1) * ITEMS_PER_PAGE + 1} - {Math.min(selectedCardsList.length, cardsPage * ITEMS_PER_PAGE)} of {selectedCardsList.length}
+                    Showing {(cardsPage - 1) * CARDS_PER_PAGE + 1} - {Math.min(selectedCardsList.length, cardsPage * CARDS_PER_PAGE)} of {selectedCardsList.length}
                   </span>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
