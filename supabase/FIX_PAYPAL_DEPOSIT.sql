@@ -36,7 +36,9 @@ CREATE POLICY "Authenticated users can insert own deposits"
   TO authenticated
   WITH CHECK (auth.uid() = user_id);
 
--- 2. Create or Replace add_funds_secure function
+-- 2. Drop existing function to allow changing return type & recreate add_funds_secure
+DROP FUNCTION IF EXISTS public.add_funds_secure(UUID, NUMERIC);
+
 CREATE OR REPLACE FUNCTION public.add_funds_secure(
   p_user_id UUID,
   p_amount NUMERIC
