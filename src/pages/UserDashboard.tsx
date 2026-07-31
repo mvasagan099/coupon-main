@@ -9,6 +9,7 @@ import { LoadingPage } from '../components/LoadingPage';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import type { Coupon, GiftCard, Order, RedemptionTransaction, Withdrawal, UserDeposit } from '../lib/supabase';
 import {
+  supabase,
   getGiftCards,
   getRedemptionTransactions,
   getUserGiftCards,
@@ -1367,24 +1368,20 @@ export default function UserDashboard() {
 
                       // 3. Credit user wallet balance in Supabase database
                       if (user?.id && capturedAmount > 0) {
-                        let credited = false;
-
                         // Tier A: Direct Supabase RPC
                         const { error: rpcErr } = await supabase.rpc('add_funds_secure', {
                           p_user_id: user.id,
                           p_amount: capturedAmount,
                         });
 
-                        if (!rpcErr) {
-                          credited = true;
-                        } else {
+                        if (rpcErr) {
                           console.warn("RPC add_funds_secure notice:", rpcErr);
 
                           // Tier B: Call Express API server /api/v1/wallet/deposit (service_role backend)
                           try {
                             const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000';
                             const apiKey = import.meta.env.VITE_API_KEY || '';
-                            const resp = await fetch(`${apiBase}/api/v1/wallet/deposit`, {
+                            await fetch(`${apiBase}/api/v1/wallet/deposit`, {
                               method: 'POST',
                               headers: {
                                 'Content-Type': 'application/json',
@@ -1397,11 +1394,6 @@ export default function UserDashboard() {
                                 paymentMethod: 'PayPal',
                               }),
                             });
-
-                            const resData = await resp.json();
-                            if (resData.success) {
-                              credited = true;
-                            }
                           } catch (apiErr) {
                             console.warn("Express API deposit fallback notice:", apiErr);
                           }
