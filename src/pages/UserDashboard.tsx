@@ -1367,24 +1367,44 @@ export default function UserDashboard() {
 
                       // 3. Credit user wallet balance in Supabase database
                       if (user?.id && capturedAmount > 0) {
+                        let credited = false;
+
+                        // Tier A: Direct Supabase RPC
                         const { error: rpcErr } = await supabase.rpc('add_funds_secure', {
                           p_user_id: user.id,
                           p_amount: capturedAmount,
                         });
 
-                        if (rpcErr) {
-                          console.warn("RPC add_funds_secure notice, applying balance fallback:", rpcErr);
-                          const { data: prof } = await supabase
-                            .from("profiles")
-                            .select("wallet_balance")
-                            .eq("id", user.id)
-                            .maybeSingle();
+                        if (!rpcErr) {
+                          credited = true;
+                        } else {
+                          console.warn("RPC add_funds_secure notice:", rpcErr);
 
-                          const curBal = prof?.wallet_balance ?? walletBalance ?? 0;
-                          await supabase
-                            .from("profiles")
-                            .update({ wallet_balance: curBal + capturedAmount })
-                            .eq("id", user.id);
+                          // Tier B: Call Express API server /api/v1/wallet/deposit (service_role backend)
+                          try {
+                            const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+                            const apiKey = import.meta.env.VITE_API_KEY || '';
+                            const resp = await fetch(`${apiBase}/api/v1/wallet/deposit`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'x-api-key': apiKey,
+                              },
+                              body: JSON.stringify({
+                                userId: user.id,
+                                amount: capturedAmount,
+                                referenceId: data.orderID,
+                                paymentMethod: 'PayPal',
+                              }),
+                            });
+
+                            const resData = await resp.json();
+                            if (resData.success) {
+                              credited = true;
+                            }
+                          } catch (apiErr) {
+                            console.warn("Express API deposit fallback notice:", apiErr);
+                          }
                         }
 
                         // Record deposit entry if deposits table exists
