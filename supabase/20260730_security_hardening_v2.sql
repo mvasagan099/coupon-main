@@ -30,15 +30,27 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  -- Only service_role and supabase_admin may change wallet_balance.
-  -- Authenticated clients (PostgREST / frontend) are silently prevented.
-  IF current_setting('role') NOT IN ('service_role', 'supabase_admin') THEN
-    -- Overwrite any client-supplied wallet_balance with the current value
+  -- IMPORTANT: Use current_user (NOT current_setting('role')) here.
+  --
+  -- current_setting('role') is a session-level GUC set by PostgREST to
+  -- 'authenticated' and does NOT change inside SECURITY DEFINER functions.
+  --
+  -- current_user DOES change: inside a SECURITY DEFINER function owned
+  -- by postgres, current_user = 'postgres', allowing the deduction.
+  --
+  -- Allow wallet_balance changes from trusted server-side identities:
+  --   postgres       — SECURITY DEFINER RPCs (issue_gift_card_coupon, etc.)
+  --   supabase_admin — Supabase internal operations
+  --   service_role   — Edge Functions / backend API
+  -- Block direct client mutations (current_user = 'authenticated' / 'anon'):
+  IF current_user NOT IN ('postgres', 'supabase_admin', 'service_role') THEN
+    -- Silently reset wallet_balance — client cannot mint funds
     NEW.wallet_balance := OLD.wallet_balance;
   END IF;
   RETURN NEW;
 END;
 $$;
+
 
 -- 2. Attach the trigger BEFORE every UPDATE on profiles
 DROP TRIGGER IF EXISTS enforce_wallet_balance_immutability ON public.profiles;
@@ -59,6 +71,7 @@ REVOKE UPDATE (wallet_balance) ON public.profiles FROM authenticated;
 --    no longer misleadingly implies it protects wallet_balance.
 --    Drop and recreate with an accurate comment.
 DROP POLICY IF EXISTS "profiles_update_own_except_balance" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_update_own"                ON public.profiles;
 CREATE POLICY "profiles_update_own"
   ON public.profiles FOR UPDATE
   USING  (auth.uid() = id)
@@ -74,3 +87,15 @@ CREATE POLICY "profiles_update_own"
 --
 -- As service_role (Edge Function / backend), this should succeed:
 --   UPDATE public.profiles SET wallet_balance = wallet_balance + 100 WHERE id = '<uuid>';
+
+
+CREATE OR REPLACE FUNCTION public.lock_wallet_balance()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF current_user NOT IN ('postgres', 'supabase_admin', 'service_role') THEN
+    NEW.wallet_balance := OLD.wallet_balance;
+  END IF;
+  RETURN NEW;
+END;
+$$;
