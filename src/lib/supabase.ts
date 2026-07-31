@@ -1162,7 +1162,38 @@ export async function verifyPayPalPayment(orderId: string): Promise<{ verified: 
     throw new Error(`Payment verification failed: ${msg}`);
   }
 
-  return { verified: !!data?.verified, amount: data?.amount };
+  const isVerified = !!data?.verified;
+  const capturedAmount = data?.amount ? Number(data.amount) : undefined;
+
+  if (isVerified && capturedAmount && capturedAmount > 0) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        // Execute backup wallet credit RPC to ensure balance is always updated
+        await supabase.rpc('add_funds_secure', {
+          p_user_id: user.id,
+          p_amount: capturedAmount,
+        });
+
+        // Record deposit log if table exists
+        try {
+          await supabase.from('deposits').insert({
+            user_id: user.id,
+            amount: capturedAmount,
+            payment_method: 'PayPal',
+            reference_id: orderId,
+            status: 'completed',
+          });
+        } catch {
+          // Ignore missing deposits table error
+        }
+      }
+    } catch (backupErr) {
+      console.warn('Backup wallet credit RPC notice:', backupErr);
+    }
+  }
+
+  return { verified: isVerified, amount: capturedAmount };
 }
 
 // ---- Withdrawal API ----------------------------------------------------

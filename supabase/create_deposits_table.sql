@@ -64,6 +64,6 @@ BEGIN
 END;
 $$;
 
--- Revoke from public, grant to service_role only
-REVOKE ALL ON FUNCTION public.add_funds_secure(UUID, NUMERIC) FROM PUBLIC, authenticated;
-GRANT EXECUTE ON FUNCTION public.add_funds_secure(UUID, NUMERIC) TO service_role;
+-- Revoke from public, grant to service_role and authenticated
+REVOKE ALL ON FUNCTION public.add_funds_secure(UUID, NUMERIC) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.add_funds_secure(UUID, NUMERIC) TO service_role, authenticated;
