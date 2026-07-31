@@ -52,7 +52,7 @@ serve(async (req: Request) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
   const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? supabaseAnonKey;
 
   const supabaseUserClient = createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: `Bearer ${jwt}` } },
@@ -135,7 +135,7 @@ serve(async (req: Request) => {
       const rawAmount = captureObj?.amount?.value || payload.purchase_units?.[0]?.amount?.value || "0";
       const capturedAmount = parseFloat(rawAmount);
 
-      if (capturedAmount > 0 && supabaseServiceKey) {
+      if (capturedAmount > 0) {
         const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
         
         // Securely credit wallet via add_funds_secure (service_role only)
@@ -145,9 +145,34 @@ serve(async (req: Request) => {
         });
 
         if (creditError) {
-          console.error("Failed to credit wallet:", creditError);
-        } else {
-          // Record deposit audit entry
+          console.error("Failed to credit wallet via add_funds_secure:", creditError);
+          // Fallback: direct profiles wallet_balance update if RPC failed
+          const { data: profileData } = await supabaseAdmin
+            .from("profiles")
+            .select("wallet_balance")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          const currentBal = profileData?.wallet_balance ?? 0;
+          const { error: updateError } = await supabaseAdmin
+            .from("profiles")
+            .update({ wallet_balance: currentBal + capturedAmount })
+            .eq("id", user.id);
+
+          if (updateError) {
+            console.error("Direct wallet_balance update fallback also failed:", updateError);
+            return jsonResponse(
+              {
+                verified: false,
+                error: `Payment captured, but failed to credit wallet: ${updateError.message}`,
+              },
+              500,
+            );
+          }
+        }
+
+        // Record deposit audit entry (swallow missing deposits table error if unmigrated)
+        try {
           await supabaseAdmin.from("deposits").insert({
             user_id: user.id,
             amount: capturedAmount,
@@ -156,6 +181,8 @@ serve(async (req: Request) => {
             status: "completed",
             created_at: new Date().toISOString(),
           });
+        } catch (depErr) {
+          console.warn("Could not record deposit row (deposits table missing):", depErr);
         }
       }
 

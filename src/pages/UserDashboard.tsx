@@ -1328,6 +1328,7 @@ export default function UserDashboard() {
                       if (result.verified && user?.id) {
                         const amountNum = result.amount || parseFloat(addMoneyAmount);
                         await refreshWalletBalance();
+                        await loadData();
                         success('Funds added', `Successfully added ₹${amountNum.toFixed(2)} to your wallet.`);
                         setShowAddMoneyModal(false);
                         setAddMoneyAmount('500');
