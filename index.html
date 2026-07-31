@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Primary SEO -->
+    <title>CouponVault – Premium Gift Card Marketplace</title>
+    <meta name="description" content="CouponVault is a secure gift card marketplace. Buy, send, and redeem premium brand vouchers instantly. Merchant and admin portals included." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://couponvault.app/" />
+
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://couponvault.app/" />
+    <meta property="og:title" content="CouponVault – Premium Gift Card Marketplace" />
+    <meta property="og:description" content="Buy, send and redeem premium brand gift cards. Secure payments, instant delivery." />
+    <meta property="og:image" content="https://couponvault.app/og-image.png" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CouponVault – Premium Gift Card Marketplace" />
+    <meta name="twitter:description" content="Buy, send and redeem premium brand gift cards. Secure payments, instant delivery." />
+    <meta name="twitter:image" content="https://couponvault.app/og-image.png" />
+
+    <!-- PWA / Theme -->
+    <meta name="theme-color" content="#630ed4" />
+    <meta name="application-name" content="CouponVault" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "CouponVault",
+      "url": "https://couponvault.app",
+      "description": "Premium gift card marketplace for buying, sending and redeeming brand vouchers.",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://couponvault.app/dashboard/marketplace?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+
+    <!-- Block FOUC: apply theme before paint -->
+    <script>
+      (function() {
+        var theme = localStorage.getItem('cv-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

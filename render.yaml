@@ -1,0 +1,75 @@
+services:
+  # ── Coupon API (Express / Node) ───────────────────────────────────────────────
+  - type: web
+    name: coupon-api
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npx tsx index.ts
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      # API key used by lottery-platform backend to call this service
+      - key: API_KEY
+        sync: false
+      # Comma-separated list of allowed frontend origins
+      # e.g. https://coupon-frontend-xxxx.onrender.com,https://yourdomain.com
+      - key: ALLOWED_ORIGINS
+        sync: false
+      # URL of this service's frontend (used in emails etc.)
+      - key: FRONTEND_URL
+        sync: false
+      # MegaDraw lottery platform integration
+      - key: LOTTERY_API_URL
+        sync: false
+      - key: LOTTERY_API_KEY
+        sync: false
+
+  # ── Coupon Frontend Static Site ───────────────────────────────────────────────
+  - type: web
+    name: coupon-frontend
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: false
+    routes:
+      # SPA fallback — all non-asset paths serve index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      # Hashed Vite assets get 1-year immutable cache
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: "camera=(), microphone=(), geolocation=(), payment=()"
+    envVars:
+      # Supabase project URL and anon key (public — safe to expose)
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      # Payment gateway public key (PayPal is the only supported deposit method)
+      - key: VITE_PAYPAL_CLIENT_ID
+        sync: false
+      # Coupon API backend URL
+      - key: VITE_API_URL
+        sync: false

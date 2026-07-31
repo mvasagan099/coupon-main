@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://couponvault.app/sitemap.xml

@@ -1,0 +1,16 @@
+{
+  "name": "CouponVault",
+  "short_name": "CouponVault",
+  "description": "Premium Gift Card Marketplace",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#630ed4",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
