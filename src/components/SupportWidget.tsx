@@ -48,6 +48,13 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
 
+  // Drag and drop state
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const isDraggingRef = useRef(false);
+  const hasDraggedRef = useRef(false);
+  const dragStartRef = useRef<{ clientX: number; clientY: number; initialX: number; initialY: number }>({ clientX: 0, clientY: 0, initialX: 0, initialY: 0 });
+
   // New ticket form
   const [subject, setSubject] = useState('');
   const [firstMessage, setFirstMessage] = useState('');
@@ -60,11 +67,78 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  const startDrag = (clientX: number, clientY: number) => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    dragStartRef.current = {
+      clientX,
+      clientY,
+      initialX: rect.left,
+      initialY: rect.top,
+    };
+    isDraggingRef.current = true;
+    hasDraggedRef.current = false;
+  };
+
+  const onDragMove = (clientX: number, clientY: number) => {
+    if (!isDraggingRef.current) return;
+    const dx = clientX - dragStartRef.current.clientX;
+    const dy = clientY - dragStartRef.current.clientY;
+
+    if (Math.hypot(dx, dy) > 4) {
+      hasDraggedRef.current = true;
+    }
+
+    const btnWidth = 58;
+    const btnHeight = 58;
+    const padding = 10;
+
+    const newX = Math.max(padding, Math.min(window.innerWidth - btnWidth - padding, dragStartRef.current.initialX + dx));
+    const newY = Math.max(padding, Math.min(window.innerHeight - btnHeight - padding, dragStartRef.current.initialY + dy));
+
+    setPos({ x: newX, y: newY });
+  };
+
+  const endDrag = () => {
+    isDraggingRef.current = false;
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDraggingRef.current) {
+        onDragMove(e.clientX, e.clientY);
+      }
+    };
+    const handleMouseUp = () => {
+      endDrag();
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (isDraggingRef.current && e.touches[0]) {
+        onDragMove(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+    const handleTouchEnd = () => {
+      endDrag();
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, []);
+
   // Close on outside click
   useEffect(() => {
     if (!open) return;
     function handler(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node) && buttonRef.current && !buttonRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     }
@@ -142,6 +216,10 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
   }
 
   function handleOpen() {
+    if (hasDraggedRef.current) {
+      hasDraggedRef.current = false;
+      return;
+    }
     setOpen((prev) => !prev);
     if (!open) {
       setView('home');
@@ -159,13 +237,25 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
     <>
       {/* Floating Button */}
       <button
+        ref={buttonRef}
         id="support-widget-btn"
         onClick={handleOpen}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          startDrag(e.clientX, e.clientY);
+        }}
+        onTouchStart={(e) => {
+          if (e.touches[0]) {
+            startDrag(e.touches[0].clientX, e.touches[0].clientY);
+          }
+        }}
         aria-label="Customer Support"
+        title="Drag to move, click for support"
         style={{
           position: 'fixed',
-          bottom: '1.75rem',
-          right: '1.75rem',
+          ...(pos
+            ? { left: `${pos.x}px`, top: `${pos.y}px`, bottom: 'auto', right: 'auto' }
+            : { bottom: '4.75rem', right: '1.75rem' }),
           zIndex: 9000,
           width: '58px',
           height: '58px',
@@ -175,18 +265,20 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
             ? '0 0 0 4px rgba(99,102,241,0.3), 0 8px 32px rgba(99,102,241,0.5)'
             : '0 4px 24px rgba(99,102,241,0.45)',
           border: 'none',
-          cursor: 'pointer',
+          cursor: isDraggingRef.current ? 'grabbing' : 'grab',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: 'box-shadow 0.25s, transform 0.2s',
+          transition: isDraggingRef.current ? 'none' : 'box-shadow 0.25s, transform 0.2s',
           transform: open ? 'scale(1.08) rotate(15deg)' : 'scale(1)',
+          userSelect: 'none',
+          touchAction: 'none',
         }}
         onMouseEnter={e => {
-          if (!open) (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)';
+          if (!open && !isDraggingRef.current) (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)';
         }}
         onMouseLeave={e => {
-          if (!open) (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
+          if (!open && !isDraggingRef.current) (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)';
         }}
       >
         {open ? (
@@ -203,7 +295,10 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
       {/* Unread pulse dot */}
       {!open && (
         <span style={{
-          position: 'fixed', bottom: '2.6rem', right: '1.75rem',
+          position: 'fixed',
+          ...(pos
+            ? { left: `${pos.x + 42}px`, top: `${pos.y - 2}px`, bottom: 'auto', right: 'auto' }
+            : { bottom: '5.6rem', right: '1.75rem' }),
           zIndex: 9001,
           width: '14px', height: '14px',
           background: '#f43f5e',
@@ -221,11 +316,22 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
           id="support-widget-panel"
           style={{
             position: 'fixed',
-            bottom: '5.5rem',
-            right: '1.75rem',
+            ...(pos
+              ? {
+                  ...(pos.x < window.innerWidth / 2
+                    ? { left: `${Math.max(10, pos.x)}px`, right: 'auto' }
+                    : { right: `${Math.max(10, window.innerWidth - pos.x - 58)}px`, left: 'auto' }),
+                  ...(pos.y > 320
+                    ? { bottom: `${Math.max(10, window.innerHeight - pos.y + 10)}px`, top: 'auto', maxHeight: `${Math.min(580, pos.y - 20)}px` }
+                    : { top: `${Math.max(10, pos.y + 68)}px`, bottom: 'auto', maxHeight: `${Math.min(580, window.innerHeight - pos.y - 80)}px` })
+                }
+              : {
+                  bottom: '8.5rem',
+                  right: '1.75rem',
+                  maxHeight: 'calc(100vh - 10rem)',
+                }),
             zIndex: 8999,
             width: 'min(400px, calc(100vw - 2rem))',
-            maxHeight: '580px',
             borderRadius: '24px',
             background: 'rgba(16, 16, 22, 0.92)',
             backdropFilter: 'blur(24px)',
