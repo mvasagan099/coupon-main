@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { TrendingUp, Clock, Building2, ShieldAlert, Landmark, FileText, X, Activity } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
-import type { AdminPurchasedCoupon, AdminUser, Company, CompanyStats, GiftCard, Settlement, AdminWithdrawal } from '../lib/supabase';
+import type { AdminPurchasedCoupon, AdminUser, Company, CompanyStats, GiftCard, Settlement, AdminWithdrawal, SupportTicket, SupportMessage } from '../lib/supabase';
 import {
   adminApproveCompany,
   adminGenerateSettlements,
@@ -23,9 +23,13 @@ import {
   updateCompanyLimit,
   adminGetWithdrawals,
   adminUpdateWithdrawalStatus,
+  adminGetAllSupportTickets,
+  adminUpdateTicketStatus,
+  getSupportTicketMessages,
+  sendSupportMessage,
 } from '../lib/supabase';
 
-const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts'] as const;
+const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts', 'support'] as const;
 type AdminSection = (typeof validSections)[number];
 
 function isAdminSection(value: string | undefined): value is AdminSection {
@@ -89,6 +93,17 @@ export default function AdminDashboard() {
 
   const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+
+  // Support ticket state
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportFilter, setSupportFilter] = useState<'all' | 'open' | 'in_progress' | 'closed'>('all');
+  const [selectedSupportTicket, setSelectedSupportTicket] = useState<SupportTicket | null>(null);
+  const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
+  const [supportMessagesLoading, setSupportMessagesLoading] = useState(false);
+  const [adminReply, setAdminReply] = useState('');
+  const [adminReplying, setAdminReplying] = useState(false);
+  const adminMessagesEndRef = useRef<HTMLDivElement>(null);
 
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
@@ -208,6 +223,60 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const loadSupport = useCallback(async () => {
+    try {
+      setSupportLoading(true);
+      const data = await adminGetAllSupportTickets();
+      setSupportTickets(data);
+    } catch (err: unknown) {
+      toastErrorRef.current('Load error', getErrorMessage(err, 'Failed to fetch support tickets.'));
+    } finally {
+      setSupportLoading(false);
+    }
+  }, []);
+
+  async function openSupportThread(ticket: SupportTicket) {
+    setSelectedSupportTicket(ticket);
+    setSupportMessagesLoading(true);
+    try {
+      const msgs = await getSupportTicketMessages(ticket.id);
+      setSupportMessages(msgs);
+    } catch {
+      /* silent */
+    } finally {
+      setSupportMessagesLoading(false);
+    }
+  }
+
+  async function handleAdminReply(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminReply.trim() || !selectedSupportTicket) return;
+    setAdminReplying(true);
+    try {
+      // Use a placeholder admin ID (the admin user ID from auth)
+      await sendSupportMessage(selectedSupportTicket.id, 'admin', adminReply.trim(), true);
+      setAdminReply('');
+      const msgs = await getSupportTicketMessages(selectedSupportTicket.id);
+      setSupportMessages(msgs);
+      await loadSupport();
+    } catch (err: unknown) {
+      toastErrorRef.current('Reply failed', getErrorMessage(err, 'Failed to send reply.'));
+    } finally {
+      setAdminReplying(false);
+    }
+  }
+
+  async function handleUpdateTicketStatus(ticketId: string, status: 'open' | 'in_progress' | 'closed') {
+    try {
+      await adminUpdateTicketStatus(ticketId, status);
+      success('Status updated', `Ticket marked as ${status.replace('_', ' ')}.`);
+      setSelectedSupportTicket(prev => prev ? { ...prev, status } : prev);
+      await loadSupport();
+    } catch (err: unknown) {
+      toastError('Update failed', getErrorMessage(err, 'Failed to update status.'));
+    }
+  }
+
   // Re-fetch when page number changes
   // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional data refetch when pagination changes
   useEffect(() => { if (currentSection === 'users') loadUsers(); }, [usersPage]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -233,6 +302,10 @@ export default function AdminDashboard() {
     }
     if (currentSection === 'payouts') {
       loadWithdrawals();
+    }
+    if (currentSection === 'support') {
+      loadSupport();
+      setSelectedSupportTicket(null);
     }
   }, [currentSection]); // eslint-disable-line react-hooks/exhaustive-deps
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -403,7 +476,33 @@ export default function AdminDashboard() {
     security: 'Security alerts and platform anomalies',
     settlements: 'Manage monthly merchant settlements',
     payouts: 'Review and process user withdrawal payouts',
+    support: 'Manage customer support tickets',
   };
+
+  // Support: filtered tickets
+  const filteredSupportTickets = useMemo(() => {
+    if (supportFilter === 'all') return supportTickets;
+    return supportTickets.filter(t => t.status === supportFilter);
+  }, [supportTickets, supportFilter]);
+
+  // Support status badge helpers
+  const SUPPORT_STATUS_COLOR: Record<string, string> = {
+    open: '#22c55e',
+    in_progress: '#f59e0b',
+    closed: '#6b7280',
+  };
+  const SUPPORT_STATUS_LABEL: Record<string, string> = {
+    open: 'Open',
+    in_progress: 'In Progress',
+    closed: 'Closed',
+  };
+
+  // Scroll to bottom of admin thread
+  useEffect(() => {
+    if (adminMessagesEndRef.current) {
+      adminMessagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [supportMessages]);
 
   return (
     <div className="dashboard-section fade-in">
@@ -1241,7 +1340,191 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* ── SUPPORT SECTION ───────────────────────────────────────────── */}
+      {currentSection === 'support' && (
+        <div style={{ display: 'grid', gridTemplateColumns: selectedSupportTicket ? '1fr 1.4fr' : '1fr', gap: '1.5rem', alignItems: 'start' }}>
+
+          {/* Left: Ticket List */}
+          <div className="glass-card-strong" style={{ padding: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '1rem', flexWrap: 'wrap' }}>
+              <div>
+                <span className="section-label">All Tickets</span>
+                <h3 style={{ margin: '0.25rem 0 0', fontSize: '1.15rem' }}>Customer Support Queue</h3>
+              </div>
+              <select
+                className="input"
+                style={{ width: 'auto', borderRadius: '99px', padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                value={supportFilter}
+                onChange={e => setSupportFilter(e.target.value as any)}
+              >
+                <option value="all">All Status</option>
+                <option value="open">Open</option>
+                <option value="in_progress">In Progress</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
+
+            {supportLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem 0' }}><div className="spinner" /></div>
+            ) : filteredSupportTickets.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2.5rem 0', color: 'var(--text-3)' }}>
+                <Activity size={32} style={{ marginBottom: '0.75rem', opacity: 0.4 }} />
+                <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>No tickets found</div>
+                <div style={{ fontSize: '0.85rem' }}>Adjust the filter or wait for customers to reach out.</div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: '540px', overflowY: 'auto' }}>
+                {filteredSupportTickets.map(ticket => (
+                  <button
+                    key={ticket.id}
+                    onClick={() => openSupportThread(ticket)}
+                    style={{
+                      background: selectedSupportTicket?.id === ticket.id ? 'rgba(99,102,241,0.12)' : 'var(--surface-soft)',
+                      border: selectedSupportTicket?.id === ticket.id ? '1px solid rgba(99,102,241,0.4)' : '1px solid var(--border)',
+                      borderRadius: '14px',
+                      padding: '0.9rem 1rem',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.15s',
+                      width: '100%',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'flex-start' }}>
+                      <div style={{ color: 'var(--text-1)', fontWeight: 600, fontSize: '0.88rem', flex: 1, lineHeight: 1.3 }}>
+                        {ticket.subject}
+                      </div>
+                      <span style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        color: SUPPORT_STATUS_COLOR[ticket.status] ?? '#6b7280',
+                        background: `${SUPPORT_STATUS_COLOR[ticket.status] ?? '#6b7280'}22`,
+                        padding: '0.2rem 0.55rem',
+                        borderRadius: '99px',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}>
+                        {SUPPORT_STATUS_LABEL[ticket.status] ?? ticket.status}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-3)', fontSize: '0.75rem', marginTop: '0.35rem' }}>
+                      {ticket.user_email ?? 'Unknown user'} · {new Date(ticket.updated_at).toLocaleDateString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right: Thread View (visible when a ticket is selected) */}
+          {selectedSupportTicket && (
+            <div className="glass-card-strong" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Thread Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1 }}>
+                  <span className="section-label">Ticket Thread</span>
+                  <h3 style={{ margin: '0.25rem 0 0.2rem', fontSize: '1.1rem' }}>{selectedSupportTicket.subject}</h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                    From: <strong style={{ color: 'var(--text-2)' }}>{selectedSupportTicket.user_email ?? 'Unknown'}</strong>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {(['open', 'in_progress', 'closed'] as const).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => handleUpdateTicketStatus(selectedSupportTicket.id, s)}
+                      className={selectedSupportTicket.status === s ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+                      style={{
+                        fontSize: '0.75rem',
+                        opacity: selectedSupportTicket.status === s ? 1 : 0.7,
+                        ...(selectedSupportTicket.status === s ? { background: SUPPORT_STATUS_COLOR[s], borderColor: SUPPORT_STATUS_COLOR[s] } : {}),
+                      }}
+                    >
+                      {SUPPORT_STATUS_LABEL[s]}
+                    </button>
+                  ))}
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: '0.75rem' }}
+                    onClick={() => setSelectedSupportTicket(null)}
+                  >
+                    <X size={13} /> Close
+                  </button>
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div style={{ flex: 1, overflowY: 'auto', maxHeight: '380px', display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.25rem 0' }}>
+                {supportMessagesLoading ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem 0' }}><div className="spinner" /></div>
+                ) : supportMessages.length === 0 ? (
+                  <div style={{ color: 'var(--text-3)', textAlign: 'center', padding: '2rem 0' }}>No messages yet.</div>
+                ) : (
+                  supportMessages.map(msg => (
+                    <div
+                      key={msg.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: msg.is_admin ? 'flex-end' : 'flex-start',
+                      }}
+                    >
+                      <div style={{
+                        maxWidth: '82%',
+                        background: msg.is_admin ? 'rgba(99,102,241,0.18)' : 'var(--surface-soft)',
+                        border: msg.is_admin ? '1px solid rgba(99,102,241,0.35)' : '1px solid var(--border)',
+                        borderRadius: msg.is_admin ? '14px 4px 14px 14px' : '4px 14px 14px 14px',
+                        padding: '0.65rem 0.9rem',
+                      }}>
+                        <div style={{ fontSize: '0.72rem', color: msg.is_admin ? 'var(--violet-400, #a78bfa)' : 'var(--text-3)', marginBottom: '0.3rem', fontWeight: 600 }}>
+                          {msg.is_admin ? '🛡 You (Admin)' : `👤 Customer`}
+                        </div>
+                        <div style={{ color: 'var(--text-1)', fontSize: '0.85rem', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {msg.message}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: '0.35rem', textAlign: msg.is_admin ? 'right' : 'left' }}>
+                          {new Date(msg.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+                <div ref={adminMessagesEndRef} />
+              </div>
+
+              {/* Admin Reply */}
+              {selectedSupportTicket.status !== 'closed' ? (
+                <form onSubmit={handleAdminReply} style={{ display: 'flex', gap: '0.75rem' }}>
+                  <input
+                    id="admin-support-reply-input"
+                    className="input"
+                    style={{ flex: 1, borderRadius: '99px' }}
+                    value={adminReply}
+                    onChange={e => setAdminReply(e.target.value)}
+                    placeholder="Type your reply as admin..."
+                    disabled={adminReplying}
+                  />
+                  <button
+                    id="admin-support-reply-send"
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={adminReplying || !adminReply.trim()}
+                    style={{ borderRadius: '99px', padding: '0 1.25rem', whiteSpace: 'nowrap' }}
+                  >
+                    {adminReplying ? 'Sending...' : 'Send Reply'}
+                  </button>
+                </form>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '0.75rem', background: 'var(--surface-soft)', borderRadius: '10px', color: 'var(--text-3)', fontSize: '0.85rem' }}>
+                  Ticket is closed. Change status to re-open it.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {confirmModal.show && (
+
         <div className="glass-modal-overlay" style={{ zIndex: 10000 }}>
           <div className="glass-modal-panel" style={{ maxWidth: '480px', padding: '2rem' }}>
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>

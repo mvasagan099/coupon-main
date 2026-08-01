@@ -6,6 +6,7 @@ import { ToastProvider } from './components/Toast';
 import { Preloader } from './components/Preloader';
 import { LoadingPage } from './components/LoadingPage';
 import Layout from './components/Layout';
+import SupportWidget from './components/SupportWidget';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
@@ -61,6 +62,7 @@ function App() {
             <Helmet>
               <title>CouponVault – Premium Gift Card Marketplace</title>
             </Helmet>
+            <SupportWidget />
             <Suspense fallback={<LoadingPage message="Loading application..." />}>
               <Routes>
                 {/* MED-04: Scan/validation page requires authentication to prevent code enumeration */}

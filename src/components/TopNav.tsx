@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   ShoppingBag, Wallet, Activity, CreditCard, LayoutDashboard,
   Users, BookOpen, CheckCircle, UserPlus, Shield, LogOut,
-  Layers, BarChart3, Store, Scan, Zap
+  Layers, BarChart3, Store, Scan, Zap, MessageCircle
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -37,6 +37,7 @@ const adminLinks: NavLink[] = [
   { label: 'Approvals',   path: '/admin/approvals',       Icon: CheckCircle },
   { label: 'Settlements', path: '/admin/settlements',     Icon: CheckCircle },
   { label: 'Payouts',     path: '/admin/payouts',         Icon: Wallet },
+  { label: 'Support',     path: '/admin/support',         Icon: MessageCircle },
   { label: 'Security',    path: '/admin/security',        Icon: Shield },
 ];
 

@@ -1358,3 +1358,142 @@ export async function adminUpdateWithdrawalStatus(
   );
   if (error) throw error;
 }
+
+// ---- Support Ticket System ----------------------------------------
+
+export interface SupportTicket {
+  id: string;
+  user_id: string;
+  user_email?: string;
+  subject: string;
+  status: 'open' | 'in_progress' | 'closed';
+  created_at: string;
+  updated_at: string;
+  latest_message?: string;
+  message_count?: number;
+}
+
+export interface SupportMessage {
+  id: string;
+  ticket_id: string;
+  sender_id: string;
+  message: string;
+  is_admin: boolean;
+  created_at: string;
+}
+
+/** Customer creates a new support ticket (first message included) */
+export async function createSupportTicket(
+  userId: string,
+  userEmail: string,
+  subject: string,
+  firstMessage: string
+): Promise<SupportTicket> {
+  const { data: ticket, error: ticketError } = await withTimeout(
+    supabase
+      .from('support_tickets')
+      .insert({ user_id: userId, user_email: userEmail, subject })
+      .select()
+      .single(),
+    8000
+  );
+  if (ticketError) throw ticketError;
+
+  const { error: msgError } = await withTimeout(
+    supabase.from('support_messages').insert({
+      ticket_id: ticket.id,
+      sender_id: userId,
+      message: firstMessage,
+      is_admin: false,
+    }),
+    8000
+  );
+  if (msgError) throw msgError;
+
+  return ticket as SupportTicket;
+}
+
+/** Customer: get own tickets */
+export async function getUserSupportTickets(userId: string): Promise<SupportTicket[]> {
+  const { data, error } = await withTimeout(
+    supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false }),
+    8000
+  );
+  if (error) throw error;
+  return (data ?? []) as SupportTicket[];
+}
+
+/** Get all messages for a ticket thread */
+export async function getSupportTicketMessages(ticketId: string): Promise<SupportMessage[]> {
+  const { data, error } = await withTimeout(
+    supabase
+      .from('support_messages')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true }),
+    8000
+  );
+  if (error) throw error;
+  return (data ?? []) as SupportMessage[];
+}
+
+/** Post a new reply to a ticket thread */
+export async function sendSupportMessage(
+  ticketId: string,
+  senderId: string,
+  message: string,
+  isAdmin: boolean
+): Promise<void> {
+  const { error: msgError } = await withTimeout(
+    supabase.from('support_messages').insert({
+      ticket_id: ticketId,
+      sender_id: senderId,
+      message,
+      is_admin: isAdmin,
+    }),
+    8000
+  );
+  if (msgError) throw msgError;
+
+  // Bump the updated_at on the ticket
+  const { error: ticketError } = await withTimeout(
+    supabase
+      .from('support_tickets')
+      .update({ updated_at: new Date().toISOString(), ...(isAdmin ? { status: 'in_progress' } : {}) })
+      .eq('id', ticketId),
+    8000
+  );
+  if (ticketError) throw ticketError;
+}
+
+/** Admin: get all tickets with user info */
+export async function adminGetAllSupportTickets(): Promise<SupportTicket[]> {
+  const { data, error } = await withTimeout(
+    supabase
+      .from('support_tickets')
+      .select('*')
+      .order('updated_at', { ascending: false }),
+    8000
+  );
+  if (error) throw error;
+  return (data ?? []) as SupportTicket[];
+}
+
+/** Admin: update ticket status */
+export async function adminUpdateTicketStatus(
+  ticketId: string,
+  status: 'open' | 'in_progress' | 'closed'
+): Promise<void> {
+  const { error } = await withTimeout(
+    supabase
+      .from('support_tickets')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', ticketId),
+    8000
+  );
+  if (error) throw error;
+}
