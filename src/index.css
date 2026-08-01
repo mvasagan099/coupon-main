@@ -2948,6 +2948,7 @@ html {
   box-shadow: 0 16px 48px rgba(31, 38, 135, 0.1);
   padding: 2rem;
   width: 100%;
+  margin: auto;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
 }

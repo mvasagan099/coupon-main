@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2 } from 'lucide-react';
@@ -1054,7 +1055,7 @@ export default function UserDashboard() {
         </div>
       )}
 
-      {activeVoucher && (
+      {activeVoucher && createPortal(
         <div className="glass-modal-overlay">
           <div className="glass-modal-panel fade-in" style={{ maxWidth: '420px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
@@ -1126,10 +1127,11 @@ export default function UserDashboard() {
               Copy voucher code
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showPaymentModal && selectedProduct && (
+      {showPaymentModal && selectedProduct && createPortal(
         <div className="glass-modal-overlay">
           <div className="glass-modal-panel fade-in" style={{ maxWidth: '480px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
@@ -1181,10 +1183,11 @@ export default function UserDashboard() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showWithdrawModal && (
+      {showWithdrawModal && createPortal(
         <div className="glass-modal-overlay">
           <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px' }}>
             {withdrawStep === 1 && (
@@ -1251,10 +1254,11 @@ export default function UserDashboard() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showAddMoneyModal && (
+      {showAddMoneyModal && createPortal(
         <div className="glass-modal-overlay">
           <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px' }}>
             <div style={{ display: 'grid', gap: '1.2rem' }}>
@@ -1431,7 +1435,8 @@ export default function UserDashboard() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
     </PayPalScriptProvider>
