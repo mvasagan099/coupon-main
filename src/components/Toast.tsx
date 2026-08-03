@@ -85,7 +85,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         aria-live="assertive"
         style={{
           position: 'fixed', bottom: '1.5rem', right: '1.5rem',
-          zIndex: 9999, display: 'flex', flexDirection: 'column', gap: '0.6rem',
+          zIndex: 99999, display: 'flex', flexDirection: 'column', gap: '0.6rem',
           pointerEvents: 'none', maxWidth: '360px', width: 'calc(100vw - 2rem)',
         }}
       >

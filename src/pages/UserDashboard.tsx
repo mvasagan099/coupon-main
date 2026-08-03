@@ -501,7 +501,7 @@ export default function UserDashboard() {
                         <div style={{ position: 'relative', zIndex: 3 }}>
                           <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
                           <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <Zap size={14} /> ${prc.toFixed(2)} now, value ${val.toFixed(2)}
+                            <Zap size={14} /> ${prc.toFixed(2)} now, value 🪙{val.toFixed(2)}
                           </div>
                         </div>
                       </div>
@@ -969,7 +969,7 @@ export default function UserDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.35)' }}>
                             <div>
                               <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>${(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>🪙{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Expires</div>
@@ -1025,7 +1025,7 @@ export default function UserDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
                             <div>
                               <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>${(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>🪙{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Expires</div>
@@ -1108,7 +1108,7 @@ export default function UserDashboard() {
                 </button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', color: 'var(--text-3)' }}>
-                <span><strong>${(activeVoucher.remaining_balance ?? 0).toFixed(2)}</strong> remaining</span>
+                <span><strong>🪙{(activeVoucher.remaining_balance ?? 0).toFixed(2)}</strong> remaining</span>
                 <span>Expires {new Date(activeVoucher.expiry_date).toLocaleDateString()}</span>
               </div>
             </div>
@@ -1170,7 +1170,7 @@ export default function UserDashboard() {
             <div className="glass-card-strong" style={{ padding: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Face Value</span>
-                <strong>${(selectedProduct.value ?? 0).toFixed(2)}</strong>
+                <strong>🪙{(selectedProduct.value ?? 0).toFixed(2)}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Purchase Price</span>

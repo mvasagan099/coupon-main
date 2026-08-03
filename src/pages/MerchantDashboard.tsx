@@ -41,7 +41,7 @@ function createInitialWizardForm() {
     title: '',
     description: '',
     value: '50',
-    price: '45',
+    price: '50',
     expiryDate: getDefaultExpiryDate(),
     bannerImage: 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60',
     terms: 'Valid at all participating locations. Cannot be exchanged for cash.',
@@ -366,7 +366,7 @@ export default function MerchantDashboard() {
                 })()}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.85rem', background: 'rgba(79,99,245,0.04)', borderRadius: '12px', marginTop: '0.25rem', borderTop: '1px solid var(--border)' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.88rem' }}>Outstanding liability</span>
-                  <strong>₹{Math.max(metrics.liabilities, 0).toFixed(2)}</strong>
+                  <strong>${Math.max(metrics.liabilities, 0).toFixed(2)}</strong>
                 </div>
               </div>
             </div>
@@ -430,7 +430,7 @@ export default function MerchantDashboard() {
                     <div key={offer.id} className="glass-card" style={{ borderRadius: '16px', padding: '1rem' }}>
                       <div style={{ fontWeight: 700 }}>{offer.title}</div>
                       <div style={{ color: 'var(--text-3)', marginTop: '0.25rem', fontSize: '0.88rem' }}>
-                        Sell at ₹{offer.price.toFixed(2)} for ₹{offer.value.toFixed(2)} of value
+                        Sell at ${offer.price.toFixed(2)} for 🪙{offer.value.toFixed(2)} of value
                       </div>
                     </div>
                   ))}
@@ -460,10 +460,10 @@ export default function MerchantDashboard() {
                     <div key={redemption.id} className="glass-card" style={{ borderRadius: '16px', padding: '1rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
                         <strong className="mono" style={{ fontSize: '0.9rem' }}>{redemption.coupon_code || 'COUPON'}</strong>
-                        <span className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>-₹{redemption.amount.toFixed(2)}</span>
+                        <span className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>-🪙{redemption.amount.toFixed(2)}</span>
                       </div>
                       <div style={{ color: 'var(--text-3)', marginTop: '0.25rem', fontSize: '0.84rem' }}>
-                        Remaining balance ₹{redemption.remaining_balance_after.toFixed(2)}
+                        Remaining balance 🪙{redemption.remaining_balance_after.toFixed(2)}
                       </div>
                     </div>
                   ))}
@@ -536,12 +536,12 @@ export default function MerchantDashboard() {
                   <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>Values and expiry</h3>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                     <div>
-                      <label className="label">Face value (₹)</label>
-                      <input className="input mono" type="number" required min={1} value={wizardForm.value} onChange={(event) => setWizardForm({ ...wizardForm, value: event.target.value })} />
+                      <label className="label">Face value (🪙)</label>
+                      <input className="input mono" type="number" required min={1} value={wizardForm.value} onChange={(event) => setWizardForm({ ...wizardForm, value: event.target.value, price: event.target.value })} />
                     </div>
                     <div>
-                      <label className="label">Selling price (₹)</label>
-                      <input className="input mono" type="number" required min={0} value={wizardForm.price} onChange={(event) => setWizardForm({ ...wizardForm, price: event.target.value })} />
+                      <label className="label">Selling price ($)</label>
+                      <input className="input mono" type="number" required min={0} value={wizardForm.price} readOnly style={{ backgroundColor: 'var(--bg-3)', opacity: 0.7, cursor: 'not-allowed' }} title="Selling price must match face value" />
                     </div>
                   </div>
                   <div>
@@ -627,11 +627,11 @@ export default function MerchantDashboard() {
                 <div>
                   <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-3)' }}>Selling price</span>
                   <p className="mono" style={{ fontSize: '1.25rem', fontWeight: 900, margin: 0, color: 'var(--cyan)' }}>
-                    ₹{wizardForm.price || '45'}.00
+                    ${wizardForm.price || '45'}.00
                   </p>
                 </div>
                 <span style={{ background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.3)', padding: '0.35rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 800, color: '#4ade80' }}>
-                  Value: ₹{wizardForm.value || '50'}
+                  Value: 🪙{wizardForm.value || '50'}
                 </span>
               </div>
             </div>
@@ -648,8 +648,8 @@ export default function MerchantDashboard() {
                       <div>
                         <div style={{ fontWeight: 700 }}>{offer.title}</div>
                         <div style={{ color: 'var(--text-3)', marginTop: '0.25rem' }}>{offer.description}</div>
-                        <div className="mono" style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
-                          <span style={{ color: 'var(--text-3)' }}>Price:</span> ₹{offer.price.toFixed(2)} <span style={{ margin: '0 0.5rem', color: 'var(--border)' }}>|</span> <span style={{ color: 'var(--text-3)' }}>Value:</span> ₹{offer.value.toFixed(2)}
+                        <div style={{ fontSize: '0.82rem', fontFamily: 'monospace', opacity: 0.8, marginTop: '0.5rem' }}>
+                          <span style={{ color: 'var(--text-3)' }}>Price:</span> ${offer.price.toFixed(2)} <span style={{ margin: '0 0.5rem', color: 'var(--border)' }}>|</span> <span style={{ color: 'var(--text-3)' }}>Value:</span> 🪙{offer.value.toFixed(2)}
                         </div>
                         <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--text-3)' }}>
                           {offer.issue_limit ? (
