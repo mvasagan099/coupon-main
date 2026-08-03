@@ -1566,6 +1566,9 @@ export interface AdminWithdrawal {
   id: string;
   user_id: string;
   email: string;
+  country?: string | null;
+  country_code?: string | null;
+  currency?: string | null;
   amount: number;
   routing_number: string;
   account_number: string;
@@ -1574,12 +1577,43 @@ export interface AdminWithdrawal {
 }
 
 export async function adminGetWithdrawals(): Promise<AdminWithdrawal[]> {
-  const { data, error } = await withTimeout(
-    supabase.rpc('admin_get_withdrawals'),
-    8000
-  );
-  if (error) throw error;
-  return data ?? [];
+  try {
+    const { data, error } = await withTimeout(
+      supabase.rpc('admin_get_withdrawals'),
+      8000
+    );
+    if (error) throw error;
+    
+    let rawList = (data ?? []) as AdminWithdrawal[];
+    if (rawList.length > 0) {
+      const userIds = Array.from(new Set(rawList.map(w => w.user_id)));
+      try {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, country, country_code, currency')
+          .in('id', userIds);
+        
+        if (profiles && profiles.length > 0) {
+          const profileMap = new Map(profiles.map(p => [p.id, p]));
+          rawList = rawList.map(w => {
+            const prof = profileMap.get(w.user_id);
+            return {
+              ...w,
+              country: w.country ?? prof?.country ?? null,
+              country_code: w.country_code ?? prof?.country_code ?? null,
+              currency: w.currency ?? prof?.currency ?? 'USD',
+            };
+          });
+        }
+      } catch (profErr) {
+        console.warn("Could not load profiles for admin withdrawals:", profErr);
+      }
+    }
+    return rawList;
+  } catch (err: any) {
+    console.warn("adminGetWithdrawals error:", err);
+    return getLocal<AdminWithdrawal[]>("cv_withdrawals", []);
+  }
 }
 
 export async function adminUpdateWithdrawalStatus(

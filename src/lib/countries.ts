@@ -139,3 +139,134 @@ export function searchCountries(query: string): CountryInfo[] {
       c.currency.toLowerCase().includes(q),
   );
 }
+
+export interface CountryBankConfig {
+  routingLabel: string;
+  routingPlaceholder: string;
+  accountLabel: string;
+  accountPlaceholder: string;
+  bankPlaceholder: string;
+}
+
+/** Get country-tailored banking details configuration. */
+export function getCountryBankConfig(countryCode: string | null | undefined): CountryBankConfig {
+  const code = (countryCode || '').toUpperCase();
+
+  if (code === 'IN') {
+    return {
+      routingLabel: 'IFSC Code',
+      routingPlaceholder: 'e.g. HDFC0001234',
+      accountLabel: 'Bank Account Number',
+      accountPlaceholder: 'e.g. 50100234567890',
+      bankPlaceholder: 'e.g. HDFC Bank, SBI, ICICI',
+    };
+  }
+
+  if (code === 'US') {
+    return {
+      routingLabel: 'ACH / ABA Routing Number',
+      routingPlaceholder: '9-digit routing number',
+      accountLabel: 'Account Number',
+      accountPlaceholder: 'Account number',
+      bankPlaceholder: 'e.g. Chase, Bank of America, Wells Fargo',
+    };
+  }
+
+  if (code === 'CA') {
+    return {
+      routingLabel: 'Transit & Institution No.',
+      routingPlaceholder: 'e.g. 12345-004',
+      accountLabel: 'Account Number',
+      accountPlaceholder: 'e.g. 1234567',
+      bankPlaceholder: 'e.g. RBC Royal Bank, TD Canada Trust',
+    };
+  }
+
+  if (code === 'GB') {
+    return {
+      routingLabel: 'Sort Code / BIC',
+      routingPlaceholder: 'e.g. 20-04-15 or BIC',
+      accountLabel: 'Account Number / IBAN',
+      accountPlaceholder: 'e.g. 12345678 or GB IBAN',
+      bankPlaceholder: 'e.g. Barclays, HSBC UK, Lloyds',
+    };
+  }
+
+  if (code === 'AU') {
+    return {
+      routingLabel: 'BSB Number',
+      routingPlaceholder: '6-digit BSB (e.g. 062-000)',
+      accountLabel: 'Account Number',
+      accountPlaceholder: 'e.g. 12345678',
+      bankPlaceholder: 'e.g. Commonwealth Bank, ANZ, NAB',
+    };
+  }
+
+  if (code === 'NZ') {
+    return {
+      routingLabel: 'Branch Code',
+      routingPlaceholder: 'e.g. 12-3456',
+      accountLabel: 'Account Number',
+      accountPlaceholder: 'e.g. 1234567-00',
+      bankPlaceholder: 'e.g. ANZ NZ, ASB Bank, BNZ',
+    };
+  }
+
+  if (['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'AT', 'FI', 'GR', 'IE', 'PT', 'SE', 'NO', 'DK', 'CH', 'PL', 'CZ', 'HU'].includes(code)) {
+    return {
+      routingLabel: 'BIC / SWIFT Code',
+      routingPlaceholder: 'e.g. DEUTDEDDBXX',
+      accountLabel: 'IBAN',
+      accountPlaceholder: 'e.g. DE89370400440532013000',
+      bankPlaceholder: 'e.g. Deutsche Bank, BNP Paribas, Santander',
+    };
+  }
+
+  if (['QA', 'AE', 'SA', 'KW', 'BH', 'OM', 'EG', 'IL', 'TR'].includes(code)) {
+    return {
+      routingLabel: 'SWIFT / BIC Code',
+      routingPlaceholder: 'e.g. QNBAQAQA',
+      accountLabel: 'IBAN',
+      accountPlaceholder: 'e.g. QA58QNBA00000000123456',
+      bankPlaceholder: 'e.g. QNB, Emirates NBD, Al Rajhi Bank',
+    };
+  }
+
+  if (['MX', 'BR', 'AR', 'CO', 'CL'].includes(code)) {
+    return {
+      routingLabel: 'CLABE / Bank Code',
+      routingPlaceholder: 'e.g. 18-digit CLABE / Code',
+      accountLabel: 'Account Number / CLABE',
+      accountPlaceholder: 'e.g. 012180001234567890',
+      bankPlaceholder: 'e.g. BBVA Mexico, Itaú, Banco Galicia',
+    };
+  }
+
+  if (['SG', 'HK', 'JP', 'KR', 'CN', 'PH', 'ID', 'MY', 'TH', 'VN', 'PK', 'BD', 'LK', 'NP'].includes(code)) {
+    return {
+      routingLabel: 'SWIFT / Branch Code',
+      routingPlaceholder: 'e.g. DBSGSGSG',
+      accountLabel: 'Bank Account Number',
+      accountPlaceholder: 'Account number',
+      bankPlaceholder: 'e.g. DBS Bank, HSBC, Maybank, Bangkok Bank',
+    };
+  }
+
+  if (['ZA', 'NG', 'KE', 'GH'].includes(code)) {
+    return {
+      routingLabel: 'Branch Code / SWIFT',
+      routingPlaceholder: 'e.g. 6-digit branch code',
+      accountLabel: 'Account Number / NUBAN',
+      accountPlaceholder: 'Account number',
+      bankPlaceholder: 'e.g. Standard Bank, Access Bank, KCB',
+    };
+  }
+
+  return {
+    routingLabel: 'Routing / IFSC / SWIFT',
+    routingPlaceholder: 'Code',
+    accountLabel: 'Account Number / IBAN',
+    accountPlaceholder: 'Account number',
+    bankPlaceholder: 'Bank Name',
+  };
+}

@@ -35,7 +35,7 @@ import {
 } from '../lib/supabase';
 import CountrySelector from '../components/CountrySelector';
 import type { CountryInfo } from '../lib/countries';
-import { getCountryByCode } from '../lib/countries';
+import { getCountryByCode, getCountryBankConfig } from '../lib/countries';
 import { convertFromUSD, formatCurrency, getRate } from '../lib/exchangeRate';
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
@@ -1742,34 +1742,12 @@ export default function UserDashboard() {
                   </div>
                 ) : (
                   (() => {
-                    const code = (userCountryCode || '').toUpperCase();
-                    let routingLabel = 'Routing / IFSC / SWIFT';
-                    let routingPlaceholder = 'Code';
-                    let accountLabel = 'Account Number / IBAN';
-                    let accountPlaceholder = 'Account number';
-
-                    if (code === 'IN') {
-                      routingLabel = 'IFSC Code';
-                      routingPlaceholder = 'e.g. HDFC0001234';
-                      accountLabel = 'Bank Account Number';
-                      accountPlaceholder = 'e.g. 50100234567890';
-                    } else if (code === 'US') {
-                      routingLabel = 'ACH / ABA Routing Number';
-                      routingPlaceholder = '9-digit routing number';
-                      accountLabel = 'Account Number';
-                      accountPlaceholder = 'Account number';
-                    } else if (['GB', 'DE', 'FR', 'IT', 'ES', 'NL', 'QA', 'AE', 'SA', 'KW', 'BH', 'OM'].includes(code)) {
-                      routingLabel = 'SWIFT / BIC Code';
-                      routingPlaceholder = 'e.g. QNBAQAQA';
-                      accountLabel = 'IBAN / Account Number';
-                      accountPlaceholder = 'e.g. QA58QNBA00000000123456';
-                    }
-
+                    const bankCfg = getCountryBankConfig(userCountryCode);
                     return (
                       <div style={{ display: 'grid', gap: '0.75rem' }}>
                         <div>
                           <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>Bank Name</label>
-                          <input className="input" type="text" required value={withdrawForm.bankName} onChange={(event) => setWithdrawForm({ ...withdrawForm, bankName: event.target.value })} placeholder={code === 'IN' ? 'e.g. HDFC Bank, SBI, ICICI' : code === 'QA' ? 'e.g. QNB, Commercial Bank' : 'e.g. Chase, Barclays'} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.9rem' }} />
+                          <input className="input" type="text" required value={withdrawForm.bankName} onChange={(event) => setWithdrawForm({ ...withdrawForm, bankName: event.target.value })} placeholder={bankCfg.bankPlaceholder} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.9rem' }} />
                         </div>
                         <div>
                           <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>Account Holder Full Name</label>
@@ -1777,12 +1755,12 @@ export default function UserDashboard() {
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '0.6rem' }}>
                           <div>
-                            <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>{routingLabel}</label>
-                            <input className="input mono" type="text" required value={withdrawForm.routing} onChange={(event) => setWithdrawForm({ ...withdrawForm, routing: event.target.value })} placeholder={routingPlaceholder} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.88rem' }} />
+                            <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>{bankCfg.routingLabel}</label>
+                            <input className="input mono" type="text" required value={withdrawForm.routing} onChange={(event) => setWithdrawForm({ ...withdrawForm, routing: event.target.value })} placeholder={bankCfg.routingPlaceholder} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.88rem' }} />
                           </div>
                           <div>
-                            <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>{accountLabel}</label>
-                            <input className="input mono" type="text" required value={withdrawForm.bankAccount} onChange={(event) => setWithdrawForm({ ...withdrawForm, bankAccount: event.target.value })} placeholder={accountPlaceholder} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.88rem' }} />
+                            <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>{bankCfg.accountLabel}</label>
+                            <input className="input mono" type="text" required value={withdrawForm.bankAccount} onChange={(event) => setWithdrawForm({ ...withdrawForm, bankAccount: event.target.value })} placeholder={bankCfg.accountPlaceholder} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.88rem' }} />
                           </div>
                         </div>
                       </div>

@@ -37,6 +37,11 @@ const FALLBACK_RATES: Record<string, number> = {
   JPY: 155.0,
   CNY: 7.23,
   SGD: 1.35,
+  HKD: 7.81,
+  NZD: 1.63,
+  MXN: 18.20,
+  BRL: 5.40,
+  ARS: 920.0,
   AED: 3.67,
   SAR: 3.75,
   QAR: 3.64,
@@ -46,6 +51,7 @@ const FALLBACK_RATES: Record<string, number> = {
   EGP: 48.5,
   PKR: 278.0,
   BDT: 117.0,
+  LKR: 305.0,
   PHP: 58.5,
   MYR: 4.70,
   THB: 36.5,
@@ -61,9 +67,14 @@ const FALLBACK_RATES: Record<string, number> = {
   NOK: 10.7,
   DKK: 6.9,
   PLN: 3.95,
-  NZD: 1.63,
-  BRL: 5.40,
-  MXN: 18.20,
+  CZK: 23.2,
+  HUF: 365.0,
+  ILS: 3.70,
+  UAH: 40.5,
+  COP: 3950.0,
+  CLP: 920.0,
+  NPR: 135.5,
+  GHS: 15.2,
 };
 
 async function fetchRates(): Promise<Record<string, number>> {
@@ -78,7 +89,7 @@ async function fetchRates(): Promise<Record<string, number>> {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json() as { rates: Record<string, number> };
-      const rates = { ...FALLBACK_RATES, ...json.rates, [BASE]: 1 };
+      const rates = { ...FALLBACK_RATES, ...(json.rates ?? {}), [BASE]: 1 };
       cache = { rates, fetchedAt: Date.now() };
       return rates;
     } catch (err) {
@@ -104,9 +115,8 @@ async function fetchRates(): Promise<Record<string, number>> {
 export async function getRate(from: string, to: string): Promise<number> {
   if (from.toUpperCase() === to.toUpperCase()) return 1;
   const rates = await fetchRates();
-  const fromRate = from.toUpperCase() === BASE ? 1 : rates[from.toUpperCase()];
-  const toRate   = to.toUpperCase()   === BASE ? 1 : rates[to.toUpperCase()];
-  if (!fromRate || !toRate) return 1;
+  const fromRate = from.toUpperCase() === BASE ? 1 : (rates[from.toUpperCase()] ?? FALLBACK_RATES[from.toUpperCase()] ?? 1);
+  const toRate   = to.toUpperCase()   === BASE ? 1 : (rates[to.toUpperCase()]   ?? FALLBACK_RATES[to.toUpperCase()]   ?? 1);
   return toRate / fromRate;
 }
 

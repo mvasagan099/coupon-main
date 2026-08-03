@@ -29,7 +29,8 @@ import {
   sendSupportMessage,
 } from '../lib/supabase';
 
-import { COUNTRIES } from '../lib/countries';
+import { COUNTRIES, getCountryByCode } from '../lib/countries';
+import { getRate, formatCurrency } from '../lib/exchangeRate';
 
 const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts', 'support', 'rates'] as const;
 type AdminSection = (typeof validSections)[number];
@@ -95,6 +96,11 @@ export default function AdminDashboard() {
 
   const [withdrawals, setWithdrawals] = useState<AdminWithdrawal[]>([]);
   const [withdrawalsLoading, setWithdrawalsLoading] = useState(false);
+  const [payoutCountryFilter, setPayoutCountryFilter] = useState<string>('all');
+  const [payoutMethodFilter, setPayoutMethodFilter]   = useState<'all' | 'paypal' | 'bank'>('all');
+  const [payoutStatusFilter, setPayoutStatusFilter]   = useState<'all' | 'pending' | 'completed' | 'rejected'>('pending');
+  const [payoutSearch, setPayoutSearch]               = useState<string>('');
+  const [exchangeRates, setExchangeRates]             = useState<Record<string, number>>({});
 
   // Support ticket state
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
@@ -236,6 +242,56 @@ export default function AdminDashboard() {
       setSupportLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (withdrawals.length === 0) return;
+    const currencies = Array.from(new Set(withdrawals.map(w => w.currency ?? 'USD')));
+    
+    const fetchRates = async () => {
+      const rateMap: Record<string, number> = { USD: 1 };
+      for (const cur of currencies) {
+        if (cur && cur !== 'USD') {
+          try {
+            rateMap[cur] = await getRate('USD', cur);
+          } catch {
+            rateMap[cur] = 1;
+          }
+        }
+      }
+      setExchangeRates(rateMap);
+    };
+    void fetchRates();
+  }, [withdrawals]);
+
+  const availableCountries = useMemo(() => {
+    const codes = Array.from(new Set(withdrawals.map(w => w.country_code).filter(Boolean))) as string[];
+    return codes.map(code => getCountryByCode(code)).filter(Boolean);
+  }, [withdrawals]);
+
+  const filteredWithdrawals = useMemo(() => {
+    return withdrawals.filter(w => {
+      if (payoutCountryFilter !== 'all') {
+        const code = (w.country_code || '').toUpperCase();
+        if (code !== payoutCountryFilter.toUpperCase()) return false;
+      }
+      if (payoutMethodFilter !== 'all') {
+        const isBank = (w.routing_number && w.routing_number !== 'PAYPAL');
+        if (payoutMethodFilter === 'paypal' && isBank) return false;
+        if (payoutMethodFilter === 'bank' && !isBank) return false;
+      }
+      if (payoutStatusFilter !== 'all') {
+        if (w.status !== payoutStatusFilter) return false;
+      }
+      if (payoutSearch.trim()) {
+        const q = payoutSearch.toLowerCase();
+        const matchEmail = (w.email || '').toLowerCase().includes(q);
+        const matchRouting = (w.routing_number || '').toLowerCase().includes(q);
+        const matchAccount = (w.account_number || '').toLowerCase().includes(q);
+        if (!matchEmail && !matchRouting && !matchAccount) return false;
+      }
+      return true;
+    });
+  }, [withdrawals, payoutCountryFilter, payoutMethodFilter, payoutStatusFilter, payoutSearch]);
 
   async function openSupportThread(ticket: SupportTicket) {
     setSelectedSupportTicket(ticket);
@@ -1253,15 +1309,65 @@ export default function AdminDashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
                 <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.25rem', color: 'var(--text-1)' }}>User Payout Requests</h3>
-                <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.95rem' }}>Review pending withdrawals, manually transfer funds via PayPal, and update statuses.</p>
+                <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.95rem' }}>Review pending withdrawals with live currency conversion and country origin.</p>
               </div>
+            </div>
+
+            {/* Filter controls */}
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.5rem', background: 'var(--surface-soft)', padding: '1rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
+              <input
+                className="input"
+                type="text"
+                placeholder="Search email, account, bank..."
+                value={payoutSearch}
+                onChange={e => setPayoutSearch(e.target.value)}
+                style={{ flex: 1, minWidth: '200px', fontSize: '0.88rem', padding: '0.55rem 0.9rem' }}
+              />
+              
+              {/* Country filter */}
+              <select
+                className="input"
+                style={{ width: 'auto', borderRadius: '10px', fontSize: '0.85rem', padding: '0.55rem 0.9rem' }}
+                value={payoutCountryFilter}
+                onChange={e => setPayoutCountryFilter(e.target.value)}
+              >
+                <option value="all">🌐 All Countries ({withdrawals.length})</option>
+                {availableCountries.map(c => (
+                  <option key={c.code} value={c.code}>{c.flag} {c.name} ({c.currency})</option>
+                ))}
+              </select>
+
+              {/* Method filter */}
+              <select
+                className="input"
+                style={{ width: 'auto', borderRadius: '10px', fontSize: '0.85rem', padding: '0.55rem 0.9rem' }}
+                value={payoutMethodFilter}
+                onChange={e => setPayoutMethodFilter(e.target.value as any)}
+              >
+                <option value="all">💳 All Payout Methods</option>
+                <option value="paypal">🅿️ PayPal</option>
+                <option value="bank">🏦 Bank Transfer</option>
+              </select>
+
+              {/* Status filter */}
+              <select
+                className="input"
+                style={{ width: 'auto', borderRadius: '10px', fontSize: '0.85rem', padding: '0.55rem 0.9rem', fontWeight: 600 }}
+                value={payoutStatusFilter}
+                onChange={e => setPayoutStatusFilter(e.target.value as any)}
+              >
+                <option value="pending">⏳ Pending ({withdrawals.filter(w => w.status === 'pending').length})</option>
+                <option value="all">⚡ All Statuses ({withdrawals.length})</option>
+                <option value="completed">✅ Completed ({withdrawals.filter(w => w.status === 'completed').length})</option>
+                <option value="rejected">❌ Rejected ({withdrawals.filter(w => w.status === 'rejected').length})</option>
+              </select>
             </div>
             
             {withdrawalsLoading ? (
               <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-4)' }}>Loading payouts...</div>
-            ) : withdrawals.length === 0 ? (
+            ) : filteredWithdrawals.length === 0 ? (
               <div className="empty-state" style={{ padding: '3rem', textAlign: 'center' }}>
-                <p style={{ color: 'var(--text-3)', margin: 0 }}>No payouts found.</p>
+                <p style={{ color: 'var(--text-3)', margin: 0 }}>No matching payouts found.</p>
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -1269,72 +1375,108 @@ export default function AdminDashboard() {
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>User Email</th>
-                      <th style={{ textAlign: 'right' }}>Amount</th>
-                      <th>Method / Account</th>
+                      <th>User & Country</th>
+                      <th style={{ textAlign: 'right' }}>Amount (Converted)</th>
+                      <th>Method / Details</th>
                       <th>Status</th>
                       <th style={{ textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {withdrawals.map((w) => (
-                      <tr key={w.id}>
-                        <td style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>
-                          {new Date(w.created_at).toLocaleString()}
-                        </td>
-                        <td style={{ fontWeight: 600, color: 'var(--text-1)' }}>{w.email}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--violet-400)' }}>
-                          ₹{w.amount.toFixed(2)}
-                        </td>
-                        <td style={{ color: 'var(--text-2)', fontSize: '0.9rem' }}>
-                          <span style={{ fontWeight: 600, textTransform: 'uppercase', marginRight: '0.5rem', fontSize: '0.8rem', padding: '0.2rem 0.4rem', borderRadius: '4px', background: 'var(--surface-soft)' }}>
-                            {w.routing_number}
-                          </span>
-                          <span className="mono">{w.account_number}</span>
-                        </td>
-                        <td>
-                          <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
-                            {w.status.toUpperCase()}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          {w.status === 'pending' && (
-                            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                              <button 
-                                className="btn btn-secondary btn-sm"
-                                style={{ backgroundColor: '#10b981', color: 'white', border: 'none', cursor: 'pointer' }}
-                                onClick={() => setConfirmModal({
-                                  show: true,
-                                  title: 'Confirm Payout Completion',
-                                  message: `Are you sure you want to mark the withdrawal of ₹${w.amount.toFixed(2)} for ${w.email} as COMPLETED? Make sure you have manually sent the funds via PayPal first.`,
-                                  actionType: 'approve',
-                                  withdrawalId: w.id,
-                                  amount: w.amount,
-                                  email: w.email,
-                                })}
-                              >
-                                Mark Paid
-                              </button>
-                              <button 
-                                className="btn btn-secondary btn-sm"
-                                style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', cursor: 'pointer' }}
-                                onClick={() => setConfirmModal({
-                                  show: true,
-                                  title: 'Reject Payout Request',
-                                  message: `Are you sure you want to REJECT the withdrawal of ₹${w.amount.toFixed(2)} for ${w.email}? This will automatically refund the money back into their wallet balance.`,
-                                  actionType: 'reject',
-                                  withdrawalId: w.id,
-                                  amount: w.amount,
-                                  email: w.email,
-                                })}
-                              >
-                                Reject & Refund
-                              </button>
+                    {filteredWithdrawals.map((w) => {
+                      const countryInfo = getCountryByCode(w.country_code ?? 'US');
+                      const currency = w.currency ?? countryInfo.currency ?? 'USD';
+                      const rate = exchangeRates[currency] ?? 1;
+                      const convertedAmount = w.amount * rate;
+                      const isBank = w.routing_number && w.routing_number !== 'PAYPAL';
+
+                      return (
+                        <tr key={w.id}>
+                          <td style={{ color: 'var(--text-3)', fontSize: '0.83rem', whiteSpace: 'nowrap' }}>
+                            {new Date(w.created_at).toLocaleString()}
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600, color: 'var(--text-1)', fontSize: '0.9rem' }}>{w.email}</div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.2rem' }}>
+                              <span>{countryInfo.flag}</span>
+                              <span>{countryInfo.name}</span>
+                              <span style={{ background: 'var(--surface-soft)', padding: '0.1rem 0.35rem', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 600, border: '1px solid var(--border)' }}>
+                                {currency}
+                              </span>
                             </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 700, color: 'var(--violet-400)', fontSize: '1rem' }}>
+                              {currency !== 'USD' ? formatCurrency(convertedAmount, currency) : `$${w.amount.toFixed(2)}`}
+                            </div>
+                            {currency !== 'USD' && (
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', fontWeight: 500 }}>
+                                (${w.amount.toFixed(2)} USD)
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ color: 'var(--text-2)', fontSize: '0.9rem' }}>
+                            {!isBank ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <span className="badge badge-blue">PayPal</span>
+                                <span className="mono" style={{ fontSize: '0.85rem' }}>{w.account_number}</span>
+                              </div>
+                            ) : (
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.2rem' }}>
+                                  <span className="badge badge-purple">Bank Wire</span>
+                                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{w.routing_number}</span>
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', fontFamily: 'monospace' }}>
+                                  Acc #: {w.account_number}
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
+                              {w.status.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            {w.status === 'pending' && (
+                              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                                <button 
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ backgroundColor: '#10b981', color: 'white', border: 'none', cursor: 'pointer' }}
+                                  onClick={() => setConfirmModal({
+                                    show: true,
+                                    title: 'Confirm Payout Completion',
+                                    message: `Are you sure you want to mark the withdrawal of ${currency !== 'USD' ? formatCurrency(convertedAmount, currency) : `$${w.amount.toFixed(2)}`} ($${w.amount.toFixed(2)} USD) for ${w.email} as COMPLETED? Make sure you have manually sent the funds first.`,
+                                    actionType: 'approve',
+                                    withdrawalId: w.id,
+                                    amount: w.amount,
+                                    email: w.email,
+                                  })}
+                                >
+                                  Mark Paid
+                                </button>
+                                <button 
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', cursor: 'pointer' }}
+                                  onClick={() => setConfirmModal({
+                                    show: true,
+                                    title: 'Reject Payout Request',
+                                    message: `Are you sure you want to REJECT the withdrawal of ${currency !== 'USD' ? formatCurrency(convertedAmount, currency) : `$${w.amount.toFixed(2)}`} ($${w.amount.toFixed(2)} USD) for ${w.email}? This will automatically refund the money back into their wallet balance.`,
+                                    actionType: 'reject',
+                                    withdrawalId: w.id,
+                                    amount: w.amount,
+                                    email: w.email,
+                                  })}
+                                >
+                                  Reject & Refund
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
