@@ -413,6 +413,21 @@ export default function UserDashboard() {
   const activeVoucherCount = activeVouchersList.length;
   const usedVoucherCount = redeemedVouchersList.length;
 
+  const totalRedeemedAmount = useMemo(() => {
+    const fromVouchers = userVouchers.reduce((acc, voucher) => {
+      const gc = giftCards.find(card => card.id === voucher.gift_card_id);
+      const faceValue = gc ? gc.value : (voucher.status === 'redeemed' || voucher.is_used ? (voucher.remaining_balance || 50) : (voucher.remaining_balance ?? 0));
+      const remaining = voucher.remaining_balance ?? 0;
+      
+      if (voucher.is_used || voucher.status === 'redeemed') {
+        return acc + faceValue;
+      }
+      return acc + Math.max(faceValue - remaining, 0);
+    }, 0);
+    const fromRedemptions = redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0);
+    return Math.max(fromVouchers, fromRedemptions);
+  }, [userVouchers, giftCards, redemptions]);
+
   return (
     <PayPalScriptProvider options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: "USD", intent: "capture" }}>
       <div className="dashboard-container">
@@ -596,7 +611,7 @@ export default function UserDashboard() {
             <DashboardCard title="Wallet balance" value={`$${walletBalance.toFixed(2)}`} variant="primary" icon={<Wallet size={20} />} />
             <DashboardCard title="Active cards" value={String(activeVoucherCount)} variant="emerald" icon={<CreditCard size={20} />} />
             <DashboardCard title="Transactions" value={String(combinedTransactions.length)} variant="violet" icon={<ArrowLeftRight size={20} />} />
-            <DashboardCard title="Redeemed value" value={`$${redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0).toFixed(2)}`} variant="amber" icon={<Gift size={20} />} />
+            <DashboardCard title="Redeemed value" value={`$${totalRedeemedAmount.toFixed(2)}`} variant="amber" icon={<Gift size={20} />} />
           </div>
 
           <div className="responsive-grid-2">
@@ -643,7 +658,7 @@ export default function UserDashboard() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Redeemed amount</span>
-                  <strong style={{ fontSize: '1.1rem' }}>${redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0).toFixed(2)}</strong>
+                  <strong style={{ fontSize: '1.1rem' }}>${totalRedeemedAmount.toFixed(2)}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Recent orders</span>

@@ -792,61 +792,153 @@ export async function redeemCouponAmount(couponId: string, amount: number): Prom
 }
 
 export async function markCouponUsedById(id: string): Promise<string> {
-  const { data: cp, error } = await supabase
-    .from("coupons")
-    .update({ is_used: true, status: "redeemed", remaining_balance: 0 })
-    .eq("id", id)
-    .select()
-    .single();
-  if (error) throw error;
-  return cp.code;
+  try {
+    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
+
+    // 1. Get current coupon balance
+    const { data: currentCoupon, error: fetchError } = await supabase
+      .from("coupons")
+      .select("remaining_balance, code")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) throw fetchError;
+    const prevBalance = currentCoupon.remaining_balance;
+
+    // 2. Update coupon
+    const { data: cp, error } = await supabase
+      .from("coupons")
+      .update({ is_used: true, status: "redeemed", remaining_balance: 0 })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    // 3. Log redemption transaction if there was a balance to redeem
+    if (prevBalance > 0) {
+      const { error: redemptionError } = await supabase
+        .from("redemptions")
+        .insert({
+          coupon_id: id,
+          amount: prevBalance,
+          remaining_balance_after: 0
+        });
+      if (redemptionError) {
+        console.error("[CouponVault] Failed to log redemption transaction:", redemptionError.message);
+      }
+    }
+
+    return cp.code;
+  } catch (err: any) {
+    console.warn("[CouponVault] markCouponUsedById failed, falling back to LocalStorage:", err.message);
+    const coupons = getLocal<Coupon[]>("cv_coupons", []);
+    const idx = coupons.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error("Coupon not found in local storage");
+
+    const prevBalance = coupons[idx].remaining_balance;
+    coupons[idx] = {
+      ...coupons[idx],
+      is_used: true,
+      status: "redeemed",
+      remaining_balance: 0
+    };
+    setLocal("cv_coupons", coupons);
+
+    if (prevBalance > 0) {
+      const redemptions = getLocal<RedemptionTransaction[]>("cv_redemptions", []);
+      redemptions.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        coupon_id: id,
+        amount: prevBalance,
+        remaining_balance_after: 0,
+        created_at: new Date().toISOString()
+      });
+      setLocal("cv_redemptions", redemptions);
+    }
+
+    return coupons[idx].code;
+  }
 }
 
 export async function getRedemptionTransactions(couponId?: string, companyId?: string): Promise<RedemptionTransaction[]> {
   try {
-    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
-    // Attempt standard read
-    const query = supabase.from("redemptions").select("*, coupons(code, companies(name))");
-    const { data, error } = await withTimeout(query.order("created_at", { ascending: false }), 8000);
-    if (error) throw error;
-    
-    let list = (data ?? []).map(d => ({
-      id: d.id,
-      coupon_id: d.coupon_id,
-      coupon_code: d.coupons?.code,
-      company_name: d.coupons?.companies?.name,
-      amount: d.amount,
-      remaining_balance_after: d.remaining_balance_after,
-      created_at: d.created_at
-    }));
+    let dbList: (RedemptionTransaction & { company_id?: string })[] = [];
+    if (isSupabaseConfigured && !hasTimedOut) {
+      // Attempt standard read
+      const query = supabase.from("redemptions").select("*, coupons(code, company_id, companies(name))");
+      const { data, error } = await withTimeout(query.order("created_at", { ascending: false }), 8000);
+      if (!error && data) {
+        dbList = data.map(d => ({
+          id: d.id,
+          coupon_id: d.coupon_id,
+          coupon_code: d.coupons?.code,
+          company_name: d.coupons?.companies?.name,
+          company_id: d.coupons?.company_id,
+          amount: Number(d.amount),
+          remaining_balance_after: Number(d.remaining_balance_after),
+          created_at: d.created_at
+        }));
+      }
+    }
 
-    if (couponId) list = list.filter(l => l.coupon_id === couponId);
-    return list;
+    // Get local redemptions
+    const redemptions = getLocal<RedemptionTransaction[]>("cv_redemptions", []);
+    const coupons = getLocal<Coupon[]>("cv_coupons", []);
+    const companies = getLocal<Company[]>("cv_companies", []);
+
+    const localList = redemptions.map(r => {
+      const cp = coupons.find(c => c.id === r.coupon_id);
+      const co = cp ? companies.find(comp => comp.id === cp.company_id) : null;
+      return {
+        ...r,
+        coupon_code: cp ? cp.code : "Unknown Code",
+        company_name: co ? co.name : "Unknown Brand",
+        company_id: cp ? cp.company_id : undefined,
+        amount: Number(r.amount),
+        remaining_balance_after: Number(r.remaining_balance_after)
+      };
+    });
+
+    const dbIds = new Set(dbList.map(r => r.id));
+    const uniqueLocal = localList.filter(r => !dbIds.has(r.id));
+
+    let combined = [...dbList, ...uniqueLocal];
+
+    if (couponId) {
+      combined = combined.filter(l => l.coupon_id === couponId);
+    }
+    if (companyId) {
+      combined = combined.filter(l => l.company_id === companyId);
+    }
+
+    return combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   } catch (err: any) {
     console.warn("[CouponVault] getRedemptionTransactions failed, falling back to LocalStorage:", err.message);
     const redemptions = getLocal<RedemptionTransaction[]>("cv_redemptions", []);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
-    
+
     let list = redemptions.map(r => {
       const cp = coupons.find(c => c.id === r.coupon_id);
       const co = cp ? companies.find(comp => comp.id === cp.company_id) : null;
       return {
         ...r,
-        coupon_code: cp ? cp.code : "UNKNOWN",
-        company_name: co ? co.name : "Unknown Brand"
+        coupon_code: cp ? cp.code : "Unknown Code",
+        company_name: co ? co.name : "Unknown Brand",
+        company_id: cp ? cp.company_id : undefined,
+        amount: Number(r.amount),
+        remaining_balance_after: Number(r.remaining_balance_after)
       };
     });
 
     if (couponId) {
-      list = list.filter(r => r.coupon_id === couponId);
+      list = list.filter(l => l.coupon_id === couponId);
     }
     if (companyId) {
-      const companyCoupons = coupons.filter(c => c.company_id === companyId).map(c => c.id);
-      list = list.filter(r => companyCoupons.includes(r.coupon_id));
+      list = list.filter(l => l.company_id === companyId);
     }
 
-    return list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 }
 
