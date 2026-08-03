@@ -178,7 +178,7 @@ export function LoginPage() {
           }
         }
 
-        setMessage({ type: 'info', text: 'Account created! Check your email to confirm, or log in if email confirmation is disabled.' });
+        setMessage({ type: 'info', text: 'Account created! Check your email to confirm.' });
       } else {
         let { error } = await supabase.auth.signInWithPassword({ email, password });
         
@@ -197,7 +197,7 @@ export function LoginPage() {
 
         if (error) {
           if (error.message.toLowerCase().includes('email not confirmed')) {
-            throw new Error('Email not confirmed. Go to Supabase SQL Editor and run: UPDATE auth.users SET email_confirmed_at = now() WHERE email = \'admin@123.com\';');
+            throw new Error('Email not confirmed. Please check your inbox and confirm your email address before signing in.');
           }
           throw error;
         }
@@ -211,54 +211,7 @@ export function LoginPage() {
     }
   };
 
-  const handleQuickLogin = async (role: 'customer' | 'merchant' | 'admin') => {
-    setLoading(true);
-    setMessage(null);
 
-    try {
-      let mockEmail = '';
-      if (role === 'admin') mockEmail = 'admin@123.com';
-      else if (role === 'merchant') mockEmail = 'merchant@starbucks.com';
-      else mockEmail = 'customer@vault.com';
-
-      const mockPass = 'vault12345';
-
-      const { error } = await supabase.auth.signInWithPassword({ email: mockEmail, password: mockPass });
-      if (error) {
-        const { error: signUpError } = await supabase.auth.signUp({
-          email: mockEmail,
-          password: mockPass,
-          options: {
-            data: {
-              role: role === 'admin' ? 'admin' : 'user',
-            },
-          },
-        });
-        if (signUpError) throw signUpError;
-
-        const { error: signInAfterError } = await supabase.auth.signInWithPassword({
-          email: mockEmail,
-          password: mockPass,
-        });
-        if (signInAfterError) throw signInAfterError;
-      }
-
-      navigate(
-        role === 'merchant'
-          ? '/merchant/overview'
-          : role === 'admin'
-            ? '/admin/overview'
-            : '/dashboard/marketplace',
-      );
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      setMessage({ type: 'error', text: `Demo profile setup failed: ${message}. Please enter custom credentials.` });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const showAdminQuickLogin = isAdminRoute;
 
   return (
     <div className={`fade-in auth-page auth-page--${isAdminRoute ? 'admin' : isCompanyRoute ? 'merchant' : 'customer'}`}>
@@ -456,22 +409,7 @@ export function LoginPage() {
             </button>
           </form>
 
-          <div className="auth-demo">
-            <div className="section-label">Quick demo access</div>
-            <div className="responsive-grid-2">
-              <button className="btn btn-secondary btn-sm" onClick={() => handleQuickLogin('customer')}>
-                Customer demo
-              </button>
-              <button className="btn btn-secondary btn-sm" onClick={() => handleQuickLogin('merchant')}>
-                Merchant demo
-              </button>
-            </div>
-            {showAdminQuickLogin && (
-              <button className="btn btn-secondary btn-sm" onClick={() => handleQuickLogin('admin')}>
-                Admin demo
-              </button>
-            )}
-          </div>
+
 
           {!isAdminRoute && (
             <div style={{ marginTop: '1.5rem', color: 'var(--text-3)', textAlign: 'center', lineHeight: 1.6 }}>

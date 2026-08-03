@@ -118,7 +118,7 @@ export default function UserDashboard() {
   }, [userCurrency]);
 
   useEffect(() => {
-    if (userCurrency && userCurrency !== 'USD' && walletBalance > 0) {
+    if (userCurrency && userCurrency !== 'USD') {
       convertFromUSD(walletBalance, userCurrency)
         .then((res) => setConvertedWalletBalance({ amount: res.amount, formatted: res.formatted }))
         .catch(() => setConvertedWalletBalance(null));
@@ -862,8 +862,8 @@ export default function UserDashboard() {
           <div className="bento-grid fade-in-cards" style={{ marginBottom: '2rem' }}>
             <DashboardCard
               title="Wallet balance"
-              value={convertedWalletBalance ? convertedWalletBalance.formatted : `$${walletBalance.toFixed(2)}`}
-              subValue={convertedWalletBalance ? `Base: $${walletBalance.toFixed(2)} USD` : undefined}
+              value={userCurrency !== 'USD' ? (convertedWalletBalance?.formatted ?? formatCurrency(walletBalance * userFxRate, userCurrency)) : `$${walletBalance.toFixed(2)}`}
+              subValue={userCurrency !== 'USD' ? `Base: $${walletBalance.toFixed(2)} USD` : undefined}
               variant="primary"
               icon={<Wallet size={20} />}
             />
@@ -920,9 +920,11 @@ export default function UserDashboard() {
                   <span className="glow-dot" />
                 </div>
                 <div style={{ fontSize: '2.8rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1 }}>
-                  {convertedWalletBalance ? convertedWalletBalance.formatted : `$${walletBalance.toFixed(2)}`}
+                  {userCurrency !== 'USD'
+                    ? (convertedWalletBalance?.formatted ?? formatCurrency(walletBalance * userFxRate, userCurrency))
+                    : `$${walletBalance.toFixed(2)}`}
                 </div>
-                {convertedWalletBalance && (
+                {userCurrency !== 'USD' && (
                   <div style={{
                     display: 'inline-flex',
                     alignItems: 'center',

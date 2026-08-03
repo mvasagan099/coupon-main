@@ -154,7 +154,7 @@ export function Layout({ children }: LayoutProps = {}) {
             >
               {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
             </button>
-            <Link className="btn btn-secondary btn-sm hidden sm:inline-flex" to="/userlogin">
+            <Link className="btn btn-secondary btn-sm" to="/userlogin">
               Customer login
             </Link>
             <Link className="btn btn-primary btn-sm" to="/companylogin">
