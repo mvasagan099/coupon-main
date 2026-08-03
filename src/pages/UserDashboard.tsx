@@ -2,12 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2 } from 'lucide-react';
+import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
 import { LoadingPage } from '../components/LoadingPage';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
+import PaymentMethodSelector from '../components/PaymentMethodSelector';
+import type { PaymentGateway } from '../lib/paymentGateway';
+import {
+  createPayment,
+  verifyPayment as verifyGatewayPayment,
+  loadRazorpayScript,
+  openRazorpayCheckout,
+} from '../lib/paymentGateway';
 import type { Coupon, GiftCard, Order, RedemptionTransaction, Withdrawal, UserDeposit } from '../lib/supabase';
 import {
   supabase,
@@ -22,8 +30,13 @@ import {
   createPayPalOrder,
   verifyPayPalPayment,
   getUserProfileData,
-  updateUserPaypalEmail
+  updateUserPaypalEmail,
+  updateUserProfile,
 } from '../lib/supabase';
+import CountrySelector from '../components/CountrySelector';
+import type { CountryInfo } from '../lib/countries';
+import { getCountryByCode } from '../lib/countries';
+import { convertFromUSD, formatCurrency, getRate } from '../lib/exchangeRate';
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
 type UserSection = (typeof validSections)[number];
@@ -61,13 +74,22 @@ export default function UserDashboard() {
 
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [withdrawStep, setWithdrawStep] = useState(1);
-  const [withdrawForm, setWithdrawForm] = useState({ routing: '', account: '', amount: '' });
+  const [withdrawMethod, setWithdrawMethod] = useState<'paypal' | 'bank'>('paypal');
+  const [withdrawForm, setWithdrawForm] = useState({
+    amount: '',
+    paypalEmail: '',   // PayPal email
+    bankAccount: '',   // Bank Account Number / IBAN
+    bankName: '',      // e.g. Chase Bank, HDFC Bank
+    routing: '',       // Routing Number / IFSC / SWIFT
+    accountName: '',   // Full Name on Bank Account
+  });
   const [withdrawLoading, setWithdrawLoading] = useState(false);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
 
   const [showAddMoneyModal, setShowAddMoneyModal] = useState(false);
   const [addMoneyAmount, setAddMoneyAmount] = useState('500');
   const [addMoneyLoading, setAddMoneyLoading] = useState(false);
+  const [selectedGateway, setSelectedGateway] = useState<PaymentGateway>('paypal');
   const [deposits, setDeposits] = useState<UserDeposit[]>([]);
   const [depositPage, setDepositPage] = useState(1);
   const [withdrawPage, setWithdrawPage] = useState(1);
@@ -78,6 +100,32 @@ export default function UserDashboard() {
   const ITEMS_PER_PAGE = 5;
   const CARDS_PER_PAGE = 6;
   const MARKETPLACE_PER_PAGE = 6;
+
+  // Country / currency state
+  const [userCountryCode, setUserCountryCode] = useState<string | null>(null);
+  const [userCurrency, setUserCurrency]       = useState<string>('USD');
+  const [profileCountry, setProfileCountry]   = useState<CountryInfo | null>(null);
+  const [savingProfile, setSavingProfile]     = useState(false);
+  const [userFxRate, setUserFxRate]           = useState<number>(1);
+  const [convertedWalletBalance, setConvertedWalletBalance] = useState<{ amount: number; formatted: string } | null>(null);
+
+  useEffect(() => {
+    if (userCurrency && userCurrency !== 'USD') {
+      getRate('USD', userCurrency).then((r) => setUserFxRate(r)).catch(() => setUserFxRate(1));
+    } else {
+      setUserFxRate(1);
+    }
+  }, [userCurrency]);
+
+  useEffect(() => {
+    if (userCurrency && userCurrency !== 'USD' && walletBalance > 0) {
+      convertFromUSD(walletBalance, userCurrency)
+        .then((res) => setConvertedWalletBalance({ amount: res.amount, formatted: res.formatted }))
+        .catch(() => setConvertedWalletBalance(null));
+    } else {
+      setConvertedWalletBalance(null);
+    }
+  }, [walletBalance, userCurrency]);
 
   const [selectedProduct, setSelectedProduct] = useState<GiftCard | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -108,7 +156,13 @@ export default function UserDashboard() {
         const profile = await getUserProfileData(user.id);
         setWalletBalance(profile.wallet_balance);
         if (profile.paypal_email) {
-          setWithdrawForm(prev => ({ ...prev, account: profile.paypal_email! }));
+          setWithdrawForm(prev => ({ ...prev, paypalEmail: profile.paypal_email! }));
+        }
+        // Load country / currency
+        if (profile.country_code) {
+          setUserCountryCode(profile.country_code);
+          setUserCurrency(profile.currency ?? getCountryByCode(profile.country_code).currency);
+          setProfileCountry(getCountryByCode(profile.country_code));
         }
       } catch (err) {
         console.error("Failed to sync wallet state:", err);
@@ -124,7 +178,7 @@ export default function UserDashboard() {
       const profile = await getUserProfileData(user.id);
       setWalletBalance(profile.wallet_balance);
       if (profile.paypal_email) {
-        setWithdrawForm(prev => ({ ...prev, account: profile.paypal_email! }));
+        setWithdrawForm(prev => ({ ...prev, paypalEmail: profile.paypal_email! }));
       }
     } catch (err: unknown) {
       console.warn("Could not fetch wallet balance:", err);
@@ -253,14 +307,204 @@ export default function UserDashboard() {
 
 
 
+
+  // ── Razorpay payment handler ─────────────────────────────────────────────────
+  const handleRazorpayPayment = async () => {
+    if (!user?.id) return;
+    const amountNum = parseFloat(addMoneyAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      toastError('Invalid amount', 'Please enter a valid amount.');
+      return;
+    }
+    setAddMoneyLoading(true);
+    try {
+      await loadRazorpayScript();
+
+      // 1. Create order on server
+      const orderData = await createPayment('razorpay', amountNum, 'INR');
+
+      // 2. Open Razorpay popup
+      const result = await openRazorpayCheckout({
+        keyId:          import.meta.env.VITE_RAZORPAY_KEY_ID,
+        orderId:        orderData.orderId,
+        amountMinorUnit: orderData.amount,
+        currency:       orderData.currency,
+        name:           'Gift Hub',
+        description:    'Wallet top-up',
+        prefillEmail:   user.email ?? '',
+        theme:          '#6c63ff',
+      });
+
+      // 3. Verify server-side + credit wallet
+      const verify = await verifyGatewayPayment(
+        'razorpay',
+        result.razorpay_order_id,
+        result.razorpay_payment_id,
+        result.razorpay_signature,
+      );
+
+      if (verify.verified) {
+        await refreshWalletBalance();
+        await loadData();
+        const creditedUSD = verify.amount ?? (amountNum / 83.5);
+        const paidLocal   = verify.amountLocal ?? amountNum;
+        success('Funds added', `Successfully added $${creditedUSD.toFixed(2)} USD to your wallet (Paid ₹${paidLocal.toFixed(2)} INR).`);
+        setShowAddMoneyModal(false);
+        setAddMoneyAmount('500');
+      } else {
+        toastError('Verification failed', 'Payment could not be verified. Contact support.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Payment failed.';
+      if (!msg.includes('cancelled')) {
+        toastError('Payment Error', msg);
+      }
+    } finally {
+      setAddMoneyLoading(false);
+    }
+  };
+
+  // ── Stripe Elements mount / unmount hook ─────────────────────────────────────
+  const stripeElementsRef = useRef<any>(null);
+  const [_stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+
+  useEffect(() => {
+    if (!showAddMoneyModal || selectedGateway !== 'stripe') {
+      setStripeClientSecret(null);
+      stripeElementsRef.current = null;
+      return;
+    }
+
+    let active = true;
+    const initStripe = async () => {
+      const amountNum = parseFloat(addMoneyAmount);
+      if (isNaN(amountNum) || amountNum <= 0) return;
+
+      setStripeLoading(true);
+      try {
+        const { getStripe } = await import('../lib/paymentGateway');
+        const stripe = await getStripe();
+        if (!stripe || !active) return;
+
+        // Clear any previous elements container content
+        const container = document.getElementById('stripe-payment-element');
+        if (container) container.innerHTML = '';
+
+        const orderData = await createPayment('stripe', amountNum, 'USD');
+        if (!active) return;
+        if (!orderData.clientSecret) {
+          throw new Error('Stripe client secret not received.');
+        }
+
+        setStripeClientSecret(orderData.clientSecret);
+
+        // Mount Stripe elements
+        setTimeout(() => {
+          if (!active) return;
+          try {
+            const elements = stripe.elements({ clientSecret: orderData.clientSecret });
+            const paymentElement = elements.create('payment');
+            paymentElement.mount('#stripe-payment-element');
+            stripeElementsRef.current = elements;
+          } catch (mountErr) {
+            console.error('Failed to mount Stripe elements:', mountErr);
+          }
+        }, 50);
+
+      } catch (err: any) {
+        console.error('Failed to init Stripe Elements:', err);
+        toastError('Stripe Initialization Error', err.message || 'Could not load Stripe.');
+      } finally {
+        if (active) setStripeLoading(false);
+      }
+    };
+
+    void initStripe();
+
+    return () => {
+      active = false;
+      const el = document.getElementById('stripe-payment-element');
+      if (el) el.innerHTML = '';
+    };
+  }, [showAddMoneyModal, selectedGateway, addMoneyAmount]);
+
+  // ── Stripe payment handler ───────────────────────────────────────────────────
+  const handleStripePayment = async () => {
+    if (!user?.id) return;
+    const elements = stripeElementsRef.current;
+    if (!elements) {
+      toastError('Stripe Error', 'Stripe payment card field is not loaded yet.');
+      return;
+    }
+
+    setAddMoneyLoading(true);
+    try {
+      const { getStripe } = await import('../lib/paymentGateway');
+      const stripe = await getStripe();
+      if (!stripe) throw new Error('Stripe SDK not loaded.');
+
+      // Confirm payment using the mounted elements instance
+      const { error, paymentIntent } = await stripe.confirmPayment({
+        elements,
+        confirmParams: { return_url: window.location.href },
+        redirect: 'if_required',
+      });
+
+      if (error) {
+        throw new Error(error.message ?? 'Stripe payment failed.');
+      }
+
+      if (!paymentIntent || paymentIntent.status !== 'succeeded') {
+        throw new Error(`Stripe payment not succeeded (status: ${paymentIntent?.status ?? 'unknown'}).`);
+      }
+
+      // Verify server-side + credit wallet
+      const verify = await verifyGatewayPayment(
+        'stripe',
+        paymentIntent.id,
+        paymentIntent.id,
+      );
+
+      if (verify.verified) {
+        await refreshWalletBalance();
+        await loadData();
+        success('Funds added', `Successfully added $${verify.amount.toFixed(2)} to your wallet.`);
+        setShowAddMoneyModal(false);
+        setAddMoneyAmount('500');
+      } else {
+        toastError('Verification failed', 'Stripe payment could not be verified.');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Payment failed.';
+      toastError('Stripe Error', msg);
+    } finally {
+      setAddMoneyLoading(false);
+    }
+  };
+
+
   // Step 1 submit: validate then show confirmation (step 0)
   const handleWithdrawalSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!user?.id) return;
-    const amount = parseFloat(withdrawForm.amount);
-    if (isNaN(amount) || amount <= 0 || amount > walletBalance) {
-      toastError('Invalid amount', 'Check your wallet balance.');
+    const enteredAmount = parseFloat(withdrawForm.amount);
+    const maxLocal = userCurrency !== 'USD' ? walletBalance * userFxRate : walletBalance;
+
+    if (isNaN(enteredAmount) || enteredAmount <= 0 || enteredAmount > maxLocal + 0.01) {
+      toastError('Invalid amount', `Enter an amount up to ${userCurrency !== 'USD' ? formatCurrency(maxLocal, userCurrency) : `$${walletBalance.toFixed(2)}`}.`);
       return;
+    }
+    if (withdrawMethod === 'paypal') {
+      if (!withdrawForm.paypalEmail || !withdrawForm.paypalEmail.includes('@')) {
+        toastError('Invalid PayPal Email', 'Please enter a valid PayPal email address.');
+        return;
+      }
+    } else {
+      if (!withdrawForm.bankName.trim() || !withdrawForm.accountName.trim() || !withdrawForm.routing.trim() || !withdrawForm.bankAccount.trim()) {
+        toastError('Incomplete Bank Details', 'Please fill in all bank account fields.');
+        return;
+      }
     }
     setWithdrawStep(0); // Show confirmation popup
   };
@@ -268,33 +512,41 @@ export default function UserDashboard() {
   // Step 0 confirm: actually submit the withdrawal
   const handleWithdrawalConfirm = async () => {
     if (!user?.id) return;
-    const amount = parseFloat(withdrawForm.amount);
+    const enteredAmount = parseFloat(withdrawForm.amount);
+    const amountUSD = userCurrency !== 'USD' ? enteredAmount / (userFxRate || 1) : enteredAmount;
 
     setWithdrawLoading(true);
-    setWithdrawStep(2); // Go to PayPal Payouts processing view
+    setWithdrawStep(2); // Go to processing view
 
-    // Simulate connecting to PayPal Payouts API
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 1800));
 
     try {
-      // Save paypal email if changed/first time
-      try {
-        await updateUserPaypalEmail(user.id, withdrawForm.account);
-      } catch (err) {
-        console.warn("Could not save paypal email:", err);
+      let routingStr = 'PAYPAL';
+      let accountStr = withdrawForm.paypalEmail;
+
+      if (withdrawMethod === 'paypal') {
+        try {
+          await updateUserPaypalEmail(user.id, withdrawForm.paypalEmail);
+        } catch (err) {
+          console.warn("Could not save paypal email:", err);
+        }
+      } else {
+        routingStr = `${withdrawForm.bankName.trim()} (${withdrawForm.routing.trim()}) | ${withdrawForm.accountName.trim()}`;
+        accountStr = withdrawForm.bankAccount.trim();
       }
 
-      // CRIT-05: createWithdrawal records the request server-side and triggers RLS-protected deduction.
-      await createWithdrawal(user.id, amount, 'PAYPAL', withdrawForm.account);
+      await createWithdrawal(user.id, amountUSD, routingStr, accountStr);
 
-      // Re-sync balance from server (authoritative source)
       await refreshWalletBalance();
-
-      // Reload data to show new withdrawal
       await loadData();
 
       setWithdrawStep(3); // Go to success view
-      success('Payout processed', `PayPal Payout of $${amount.toFixed(2)} processed successfully.`);
+      success(
+        'Payout requested',
+        withdrawMethod === 'paypal'
+          ? `PayPal Payout requested successfully.`
+          : `Bank transfer of ${userCurrency !== 'USD' ? formatCurrency(enteredAmount, userCurrency) : `$${amountUSD.toFixed(2)}`} to ${withdrawForm.bankName} requested successfully.`
+      );
     } catch (err: unknown) {
       setWithdrawStep(1); // Return to form on error
       toastError('Withdrawal error', getErrorMessage(err, 'Failed to process payout.'));
@@ -314,7 +566,7 @@ export default function UserDashboard() {
         date: order.created_at,
         brand: order.company?.name || 'Marketplace purchase',
         type: 'Purchase',
-        amount: `-$${order.amount.toFixed(2)}`,
+        amount: `-${formatCurrency(order.amount * userFxRate, userCurrency)}`,
         status: 'Completed',
       });
     });
@@ -324,7 +576,7 @@ export default function UserDashboard() {
         date: redemption.created_at,
         brand: redemption.company_name || 'Merchant',
         type: 'Redemption',
-        amount: `-$${redemption.amount.toFixed(2)}`,
+        amount: `-${formatCurrency(redemption.amount * userFxRate, userCurrency)}`,
         status: 'Settled',
       });
     });
@@ -334,7 +586,7 @@ export default function UserDashboard() {
         date: deposit.created_at,
         brand: deposit.payment_method || 'Wallet Top-up',
         type: 'Deposit',
-        amount: `+$${deposit.amount.toFixed(2)}`,
+        amount: `+${formatCurrency(deposit.amount * userFxRate, userCurrency)}`,
         status: deposit.status === 'completed' ? 'Completed' : 'Pending',
       });
     });
@@ -344,7 +596,7 @@ export default function UserDashboard() {
         date: w.created_at,
         brand: `Payout (${w.account_number ? '...' + w.account_number.slice(-4) : 'Bank'})`,
         type: 'Withdrawal',
-        amount: `-$${w.amount.toFixed(2)}`,
+        amount: `-${formatCurrency(w.amount * userFxRate, userCurrency)}`,
         status: w.status === 'completed' ? 'Completed' : w.status === 'rejected' ? 'Rejected' : 'Pending',
       });
 
@@ -353,7 +605,7 @@ export default function UserDashboard() {
           date: w.updated_at || w.created_at,
           brand: `Refund (Rejected Payout)`,
           type: 'Refund',
-          amount: `+$${w.amount.toFixed(2)}`,
+          amount: `+${formatCurrency(w.amount * userFxRate, userCurrency)}`,
           status: 'Completed',
         });
       }
@@ -516,7 +768,7 @@ export default function UserDashboard() {
                         <div style={{ position: 'relative', zIndex: 3 }}>
                           <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
                           <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <Zap size={14} /> ${prc.toFixed(2)} now, value 🪙{val.toFixed(2)}
+                            <Zap size={14} /> {userCurrency !== 'USD' ? `${formatCurrency(prc * userFxRate, userCurrency)} now` : `$${prc.toFixed(2)} now`}, value 🪙{val.toFixed(2)}
                           </div>
                         </div>
                       </div>
@@ -608,11 +860,52 @@ export default function UserDashboard() {
           </div>
 
           <div className="bento-grid fade-in-cards" style={{ marginBottom: '2rem' }}>
-            <DashboardCard title="Wallet balance" value={`$${walletBalance.toFixed(2)}`} variant="primary" icon={<Wallet size={20} />} />
+            <DashboardCard
+              title="Wallet balance"
+              value={convertedWalletBalance ? convertedWalletBalance.formatted : `$${walletBalance.toFixed(2)}`}
+              subValue={convertedWalletBalance ? `Base: $${walletBalance.toFixed(2)} USD` : undefined}
+              variant="primary"
+              icon={<Wallet size={20} />}
+            />
             <DashboardCard title="Active cards" value={String(activeVoucherCount)} variant="emerald" icon={<CreditCard size={20} />} />
             <DashboardCard title="Transactions" value={String(combinedTransactions.length)} variant="violet" icon={<ArrowLeftRight size={20} />} />
-            <DashboardCard title="Redeemed value" value={`$${totalRedeemedAmount.toFixed(2)}`} variant="amber" icon={<Gift size={20} />} />
+            <DashboardCard
+              title="Redeemed value"
+              value={userCurrency !== 'USD' ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : `$${totalRedeemedAmount.toFixed(2)}`}
+              variant="amber"
+              icon={<Gift size={20} />}
+            />
           </div>
+
+          {/* Profile completion banner for users without country set */}
+          {!userCountryCode && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0.9rem 1.2rem',
+              marginBottom: '1.25rem',
+              background: 'linear-gradient(135deg, rgba(99,91,255,0.08) 0%, rgba(0,199,146,0.08) 100%)',
+              border: '1.5px solid rgba(99,91,255,0.2)',
+              borderRadius: '14px',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+            }}>
+              <span style={{ fontSize: '1.4rem' }}>🌍</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-1)' }}>Complete your profile</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: '0.15rem' }}>
+                  Select your country to get local currency pricing and region-specific payment methods.
+                </div>
+              </div>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => navigate('/dashboard/wallet')}
+                style={{ flexShrink: 0, borderRadius: '10px' }}
+              >
+                Set country
+              </button>
+            </div>
+          )}
 
           <div className="responsive-grid-2">
             <div className="premium-gradient-card" style={{ padding: '1.6rem' }}>
@@ -626,7 +919,28 @@ export default function UserDashboard() {
                   </span>
                   <span className="glow-dot" />
                 </div>
-                <div style={{ fontSize: '2.8rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1 }}>${walletBalance.toFixed(2)}</div>
+                <div style={{ fontSize: '2.8rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1 }}>
+                  {convertedWalletBalance ? convertedWalletBalance.formatted : `$${walletBalance.toFixed(2)}`}
+                </div>
+                {convertedWalletBalance && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    fontSize: '0.9rem',
+                    fontWeight: 600,
+                    color: 'rgba(255,255,255,0.9)',
+                    background: 'rgba(255,255,255,0.15)',
+                    backdropFilter: 'blur(8px)',
+                    padding: '0.3rem 0.75rem',
+                    borderRadius: '99px',
+                    marginTop: '0.65rem',
+                    border: '1px solid rgba(255,255,255,0.22)',
+                  }}>
+                    <span>🌍</span>
+                    <span>${walletBalance.toFixed(2)} USD</span>
+                  </div>
+                )}
                 <p style={{ color: 'rgba(255,255,255,0.75)', lineHeight: 1.6, marginTop: '0.75rem', fontSize: '0.92rem' }}>
                   Use your stored balance for instant purchases, top up funds, and test wallet flows with the mock gateway.
                 </p>
@@ -658,7 +972,9 @@ export default function UserDashboard() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Redeemed amount</span>
-                  <strong style={{ fontSize: '1.1rem' }}>${totalRedeemedAmount.toFixed(2)}</strong>
+                  <strong style={{ fontSize: '1.1rem' }}>
+                    {userCurrency !== 'USD' ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : `$${totalRedeemedAmount.toFixed(2)}`}
+                  </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Recent orders</span>
@@ -696,7 +1012,9 @@ export default function UserDashboard() {
                         <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(d.created_at).toLocaleString()}</td>
                         <td style={{ fontWeight: 600 }}>{d.payment_method || 'Wallet Top-up'}</td>
                         <td className="mono text-muted" style={{ fontSize: '0.8rem' }}>{d.reference_id || d.id.slice(0, 10)}</td>
-                        <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>+${d.amount.toFixed(2)}</td>
+                        <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>
+                          +{formatCurrency(d.amount * userFxRate, userCurrency)}
+                        </td>
                         <td>
                           <span className={`badge ${d.status === 'completed' ? 'badge-green' : d.status === 'failed' ? 'badge-red' : 'badge-amber'}`}>
                             {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
@@ -750,20 +1068,32 @@ export default function UserDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {slicedWithdrawals.map((w) => (
-                      <tr key={w.id}>
-                        <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(w.created_at).toLocaleString()}</td>
-                        <td className="mono font-medium">${w.amount.toFixed(2)}</td>
-                        <td>
-                          <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
-                            {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
-                          </span>
-                        </td>
-                        <td className="mono text-muted" style={{ fontSize: '0.82rem' }}>
-                          {w.account_number.includes('@') ? w.account_number : `...${w.account_number.slice(-4)}`}
-                        </td>
-                      </tr>
-                    ))}
+                    {slicedWithdrawals.map((w) => {
+                      const isPaypal = w.routing_number === 'PAYPAL' || w.account_number.includes('@');
+                      return (
+                        <tr key={w.id}>
+                          <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(w.created_at).toLocaleString()}</td>
+                          <td className="mono font-medium">{formatCurrency(w.amount * userFxRate, userCurrency)}</td>
+                          <td>
+                            <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
+                              {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <span className={`badge ${isPaypal ? 'badge-blue' : 'badge-purple'}`} style={{ fontSize: '0.68rem' }}>
+                                {isPaypal ? 'PayPal' : 'Bank Wire'}
+                              </span>
+                              <span className="mono text-muted" style={{ fontSize: '0.82rem' }}>
+                                {isPaypal
+                                  ? w.account_number
+                                  : `${w.routing_number.split('|')[0] ?? ''} (••••${w.account_number.slice(-4)})`}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
 
@@ -795,6 +1125,71 @@ export default function UserDashboard() {
               </div>
             </div>
           )}
+
+          {/* Country & Profile Settings */}
+          <div className="glass-card-strong" style={{ padding: '1.5rem', marginTop: '1.5rem', position: 'relative', zIndex: 100 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <div className="section-label">🌍 Country & Currency</div>
+                <div style={{ fontSize: '0.88rem', color: 'var(--text-3)', marginTop: '0.25rem' }}>
+                  {userCountryCode
+                    ? `${profileCountry?.flag ?? ''} ${profileCountry?.name ?? userCountryCode} · ${userCurrency}`
+                    : 'Not set — select your country to enable local currency'}
+                </div>
+              </div>
+              {userCountryCode && (
+                <span className="badge badge-green" style={{ fontSize: '0.72rem' }}>
+                  ✓ {userCurrency}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              <label className="label" style={{ margin: 0 }}>
+                {userCountryCode ? 'Change country' : 'Select your country'}
+              </label>
+              <CountrySelector
+                value={profileCountry?.code}
+                onChange={(c) => setProfileCountry(c)}
+                disabled={savingProfile}
+              />
+
+              {profileCountry && profileCountry.code !== userCountryCode && (
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                    Will set currency to <strong>{profileCountry.currency}</strong> ({profileCountry.currencySymbol})
+                  </span>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={savingProfile}
+                    onClick={async () => {
+                      if (!user?.id || !profileCountry) return;
+                      setSavingProfile(true);
+                      try {
+                        await updateUserProfile(user.id, {
+                          country:            profileCountry.name,
+                          country_code:       profileCountry.code,
+                          currency:           profileCountry.currency,
+                          timezone:           profileCountry.timezone,
+                          phone_country_code: profileCountry.phoneCode,
+                        });
+                        setUserCountryCode(profileCountry.code);
+                        setUserCurrency(profileCountry.currency);
+                        success('Profile updated', `Country set to ${profileCountry.name}. Currency: ${profileCountry.currency}`);
+                      } catch (err) {
+                        toastError('Update failed', err instanceof Error ? err.message : 'Could not update profile.');
+                      } finally {
+                        setSavingProfile(false);
+                      }
+                    }}
+                    style={{ borderRadius: '10px' }}
+                  >
+                    {savingProfile ? <><span className="spinner" style={{ width: '14px', height: '14px' }} /> Saving…</> : 'Save country'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div aria-live="polite" className="glass-card-strong" style={{ padding: '1.25rem', display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <div>
@@ -1189,11 +1584,19 @@ export default function UserDashboard() {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Purchase Price</span>
-                <strong style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>${(selectedProduct.price ?? 0).toFixed(2)}</strong>
+                <strong style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>
+                  {userCurrency !== 'USD'
+                    ? formatCurrency((selectedProduct.price ?? 0) * userFxRate, userCurrency)
+                    : `$${(selectedProduct.price ?? 0).toFixed(2)}`}
+                </strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Cashback (10%)</span>
-                <strong style={{ color: '#10b981' }}>+${((selectedProduct.value ?? 0) * 0.1).toFixed(2)}</strong>
+                <strong style={{ color: '#10b981' }}>
+                  {userCurrency !== 'USD'
+                    ? `+${formatCurrency((selectedProduct.value ?? 0) * 0.1 * userFxRate, userCurrency)}`
+                    : `+$${((selectedProduct.value ?? 0) * 0.1).toFixed(2)}`}
+                </strong>
               </div>
             </div>
             {/* Remove name and method fields as they are not used for wallet purchases */}
@@ -1201,7 +1604,11 @@ export default function UserDashboard() {
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
               <div style={{ flex: 1, padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.03)', borderRadius: '14px' }}>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Wallet Balance</div>
-                <strong style={{ fontSize: '1.1rem' }}>${walletBalance.toFixed(2)}</strong>
+                <strong style={{ fontSize: '1.1rem' }}>
+                  {userCurrency !== 'USD'
+                    ? formatCurrency(walletBalance * userFxRate, userCurrency)
+                    : `$${walletBalance.toFixed(2)}`}
+                </strong>
               </div>
               <button
                 className="btn btn-primary"
@@ -1225,9 +1632,9 @@ export default function UserDashboard() {
 
       {showWithdrawModal && createPortal(
         <div className="glass-modal-overlay">
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px' }}>
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '460px' }}>
             {withdrawStep === 1 && (
-              <form onSubmit={handleWithdrawalSubmit} style={{ display: 'grid', gap: '1.2rem' }}>
+              <form onSubmit={handleWithdrawalSubmit} style={{ display: 'grid', gap: '1.1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                     <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--primary-soft)', display: 'grid', placeItems: 'center', color: 'var(--primary)' }}>
@@ -1243,30 +1650,155 @@ export default function UserDashboard() {
                   </button>
                 </div>
 
-                <div style={{ padding: '1rem', background: 'var(--surface-soft)', borderRadius: '14px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ padding: '0.9rem 1rem', background: 'var(--surface-soft)', borderRadius: '14px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>Available balance</span>
-                  <strong style={{ fontSize: '1.1rem', color: 'var(--text-1)' }}>${walletBalance.toFixed(2)}</strong>
+                  <div style={{ textAlign: 'right' }}>
+                    <strong style={{ fontSize: '1.1rem', color: 'var(--text-1)' }}>
+                      {convertedWalletBalance ? convertedWalletBalance.formatted : `$${walletBalance.toFixed(2)}`}
+                    </strong>
+                    {convertedWalletBalance && (
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', fontWeight: 600 }}>
+                        ($${walletBalance.toFixed(2)} USD)
+                      </div>
+                    )}
+                  </div>
                 </div>
 
+                {/* Method selector */}
                 <div>
-                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Amount (USD)</label>
-                  <input className="input mono" type="number" step="0.01" max={walletBalance} required value={withdrawForm.amount} onChange={(event) => setWithdrawForm({ ...withdrawForm, amount: event.target.value })} placeholder="0.00" style={{ width: '100%', fontSize: '1.1rem', padding: '0.75rem 1rem' }} />
-                </div>
-                <div>
-                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>PayPal Email Address</label>
-                  <input className="input mono" type="email" required value={withdrawForm.account} onChange={(event) => setWithdrawForm({ ...withdrawForm, account: event.target.value })} placeholder="your-paypal@example.com" style={{ width: '100%', padding: '0.75rem 1rem' }} />
+                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.4rem' }}>Payout Method</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => setWithdrawMethod('paypal')}
+                      style={{
+                        padding: '0.65rem',
+                        borderRadius: '12px',
+                        fontWeight: 600,
+                        fontSize: '0.88rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.4rem',
+                        background: withdrawMethod === 'paypal' ? 'var(--primary-muted)' : 'var(--surface-soft)',
+                        border: `1.5px solid ${withdrawMethod === 'paypal' ? 'var(--primary)' : 'var(--border)'}`,
+                        color: withdrawMethod === 'paypal' ? 'var(--primary)' : 'var(--text-2)',
+                      }}
+                    >
+                      <span>🅿️</span> PayPal
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => setWithdrawMethod('bank')}
+                      style={{
+                        padding: '0.65rem',
+                        borderRadius: '12px',
+                        fontWeight: 600,
+                        fontSize: '0.88rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.4rem',
+                        background: withdrawMethod === 'bank' ? 'var(--primary-muted)' : 'var(--surface-soft)',
+                        border: `1.5px solid ${withdrawMethod === 'bank' ? 'var(--primary)' : 'var(--border)'}`,
+                        color: withdrawMethod === 'bank' ? 'var(--primary)' : 'var(--text-2)',
+                      }}
+                    >
+                      <Landmark size={15} /> Bank Transfer
+                    </button>
+                  </div>
                 </div>
 
-                <button className="btn btn-primary" disabled={withdrawLoading} type="submit" style={{ padding: '0.9rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px' }}>
-                  Confirm Payout
+                {/* Amount input */}
+                <div>
+                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>
+                    Amount ({userCurrency})
+                  </label>
+                  <input
+                    className="input mono"
+                    type="number"
+                    step="0.01"
+                    max={userCurrency !== 'USD' ? walletBalance * userFxRate : walletBalance}
+                    required
+                    value={withdrawForm.amount}
+                    onChange={(event) => setWithdrawForm({ ...withdrawForm, amount: event.target.value })}
+                    placeholder="0.00"
+                    style={{ width: '100%', fontSize: '1.1rem', padding: '0.65rem 0.9rem' }}
+                  />
+                  {userCurrency !== 'USD' && withdrawForm.amount && !isNaN(parseFloat(withdrawForm.amount)) && (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: '0.3rem', fontWeight: 500 }}>
+                      ≈ ${(parseFloat(withdrawForm.amount) / (userFxRate || 1)).toFixed(2)} USD will be deducted from your wallet
+                    </div>
+                  )}
+                </div>
+
+                {/* Dynamic fields based on method */}
+                {withdrawMethod === 'paypal' ? (
+                  <div>
+                    <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>PayPal Email Address</label>
+                    <input className="input mono" type="email" required value={withdrawForm.paypalEmail} onChange={(event) => setWithdrawForm({ ...withdrawForm, paypalEmail: event.target.value })} placeholder="your-paypal@example.com" style={{ width: '100%', padding: '0.65rem 0.9rem' }} />
+                  </div>
+                ) : (
+                  (() => {
+                    const code = (userCountryCode || '').toUpperCase();
+                    let routingLabel = 'Routing / IFSC / SWIFT';
+                    let routingPlaceholder = 'Code';
+                    let accountLabel = 'Account Number / IBAN';
+                    let accountPlaceholder = 'Account number';
+
+                    if (code === 'IN') {
+                      routingLabel = 'IFSC Code';
+                      routingPlaceholder = 'e.g. HDFC0001234';
+                      accountLabel = 'Bank Account Number';
+                      accountPlaceholder = 'e.g. 50100234567890';
+                    } else if (code === 'US') {
+                      routingLabel = 'ACH / ABA Routing Number';
+                      routingPlaceholder = '9-digit routing number';
+                      accountLabel = 'Account Number';
+                      accountPlaceholder = 'Account number';
+                    } else if (['GB', 'DE', 'FR', 'IT', 'ES', 'NL', 'QA', 'AE', 'SA', 'KW', 'BH', 'OM'].includes(code)) {
+                      routingLabel = 'SWIFT / BIC Code';
+                      routingPlaceholder = 'e.g. QNBAQAQA';
+                      accountLabel = 'IBAN / Account Number';
+                      accountPlaceholder = 'e.g. QA58QNBA00000000123456';
+                    }
+
+                    return (
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        <div>
+                          <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>Bank Name</label>
+                          <input className="input" type="text" required value={withdrawForm.bankName} onChange={(event) => setWithdrawForm({ ...withdrawForm, bankName: event.target.value })} placeholder={code === 'IN' ? 'e.g. HDFC Bank, SBI, ICICI' : code === 'QA' ? 'e.g. QNB, Commercial Bank' : 'e.g. Chase, Barclays'} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.9rem' }} />
+                        </div>
+                        <div>
+                          <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>Account Holder Full Name</label>
+                          <input className="input" type="text" required value={withdrawForm.accountName} onChange={(event) => setWithdrawForm({ ...withdrawForm, accountName: event.target.value })} placeholder="Full name as on bank account" style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.9rem' }} />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '0.6rem' }}>
+                          <div>
+                            <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>{routingLabel}</label>
+                            <input className="input mono" type="text" required value={withdrawForm.routing} onChange={(event) => setWithdrawForm({ ...withdrawForm, routing: event.target.value })} placeholder={routingPlaceholder} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.88rem' }} />
+                          </div>
+                          <div>
+                            <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.25rem' }}>{accountLabel}</label>
+                            <input className="input mono" type="text" required value={withdrawForm.bankAccount} onChange={(event) => setWithdrawForm({ ...withdrawForm, bankAccount: event.target.value })} placeholder={accountPlaceholder} style={{ width: '100%', padding: '0.6rem 0.85rem', fontSize: '0.88rem' }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+
+                <button className="btn btn-primary" disabled={withdrawLoading} type="submit" style={{ padding: '0.85rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px', marginTop: '0.25rem' }}>
+                  Review Payout Details
                 </button>
               </form>
             )}
 
             {/* ── Step 0: Confirmation popup ─────────────────────────── */}
             {withdrawStep === 0 && (
-              <div style={{ display: 'grid', gap: '1.4rem' }}>
-                {/* Header */}
+              <div style={{ display: 'grid', gap: '1.2rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                   <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                     <ArrowDownLeft size={20} color="white" />
@@ -1277,36 +1809,55 @@ export default function UserDashboard() {
                   </div>
                 </div>
 
-                {/* Amount highlight */}
-                <div style={{ textAlign: 'center', padding: '1.5rem 1rem', background: 'linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.06))', borderRadius: '18px', border: '1.5px solid rgba(99,102,241,0.18)' }}>
+                <div style={{ textAlign: 'center', padding: '1.3rem 1rem', background: 'linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.06))', borderRadius: '18px', border: '1.5px solid rgba(99,102,241,0.18)' }}>
                   <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-3)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.35rem' }}>Withdrawal Amount</div>
                   <div style={{ fontSize: '2.4rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'monospace', lineHeight: 1 }}>
-                    ${parseFloat(withdrawForm.amount || '0').toFixed(2)}
+                    {userCurrency !== 'USD'
+                      ? formatCurrency(parseFloat(withdrawForm.amount || '0'), userCurrency)
+                      : `$${parseFloat(withdrawForm.amount || '0').toFixed(2)}`}
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: '0.4rem' }}>US Dollar</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: '0.4rem' }}>
+                    {userCurrency !== 'USD'
+                      ? `≈ $${(parseFloat(withdrawForm.amount || '0') / (userFxRate || 1)).toFixed(2)} USD deducted from wallet`
+                      : 'US Dollar'}
+                  </div>
                 </div>
 
-                {/* Email verification row */}
-                <div style={{ padding: '0.9rem 1.1rem', background: 'var(--surface-soft)', borderRadius: '14px', border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: '0.3rem' }}>PayPal Account</div>
+                {/* Account details box */}
+                <div style={{ padding: '0.9rem 1.1rem', background: 'var(--surface-soft)', borderRadius: '14px', border: '1px solid var(--border)', display: 'grid', gap: '0.4rem' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+                    {withdrawMethod === 'paypal' ? 'PayPal Account' : 'Bank Transfer Account'}
+                  </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0 }} />
-                    <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.9rem', wordBreak: 'break-all' }}>{withdrawForm.account}</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.88rem', wordBreak: 'break-all' }}>
+                      {withdrawMethod === 'paypal'
+                        ? withdrawForm.paypalEmail
+                        : `${withdrawForm.bankName} · ${withdrawForm.accountName} (${withdrawForm.routing})`}
+                    </span>
                   </div>
+                  {withdrawMethod === 'bank' && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', fontFamily: 'monospace', paddingLeft: '1.5rem' }}>
+                      Account #: ••••{withdrawForm.bankAccount.slice(-4)}
+                    </div>
+                  )}
                 </div>
 
                 {/* Info notice */}
-                <div style={{ padding: '1rem 1.1rem', background: 'rgba(245,158,11,0.07)', borderRadius: '14px', border: '1px solid rgba(245,158,11,0.22)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                <div style={{ padding: '0.9rem 1rem', background: 'rgba(245,158,11,0.07)', borderRadius: '14px', border: '1px solid rgba(245,158,11,0.22)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
                   <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>⏱️</span>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--text-1)', marginBottom: '0.25rem' }}>Processing time: 2–3 hours</div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', lineHeight: 1.55 }}>
-                      Once confirmed, the funds will be credited to your PayPal account within <strong>2–3 business hours</strong>. You will receive a confirmation email at <strong>{withdrawForm.account}</strong>.
+                    <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--text-1)', marginBottom: '0.2rem' }}>
+                      Processing time: {withdrawMethod === 'paypal' ? '2–3 hours' : '1–2 business days'}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', lineHeight: 1.5 }}>
+                      {withdrawMethod === 'paypal'
+                        ? <>Funds will be sent to your PayPal account <strong>{withdrawForm.paypalEmail}</strong>.</>
+                        : <>Wire transfer will be issued to <strong>{withdrawForm.bankName}</strong> for <strong>{withdrawForm.accountName}</strong>.</>}
                     </div>
                   </div>
                 </div>
 
-                {/* Action buttons */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: '0.75rem' }}>
                   <button
                     className="btn btn-secondary"
@@ -1323,7 +1874,7 @@ export default function UserDashboard() {
                     onClick={handleWithdrawalConfirm}
                     style={{ borderRadius: '12px', padding: '0.85rem', fontWeight: 700, fontSize: '0.95rem' }}
                   >
-                    {withdrawLoading ? <><span className="spinner" /> Processing…</> : 'Confirm & Send'}
+                    {withdrawLoading ? <><span className="spinner" /> Processing…</> : 'Confirm & Request'}
                   </button>
                 </div>
               </div>
@@ -1333,8 +1884,12 @@ export default function UserDashboard() {
               <div style={{ textAlign: 'center', display: 'grid', gap: '1.2rem', padding: '2rem 0' }}>
                 <span className="spinner" style={{ margin: '0 auto', width: '48px', height: '48px', borderWidth: '4px', borderColor: 'var(--primary) transparent transparent transparent' }} />
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>Connecting to PayPal...</h3>
-                  <p style={{ margin: '0.4rem 0 0', color: 'var(--text-3)', fontSize: '0.9rem', lineHeight: 1.5 }}>Verifying PayPal account details and securing connection.</p>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700 }}>
+                    {withdrawMethod === 'paypal' ? 'Connecting to PayPal...' : 'Submitting Bank Wire Request...'}
+                  </h3>
+                  <p style={{ margin: '0.4rem 0 0', color: 'var(--text-3)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+                    Securing transaction details and logging payout request.
+                  </p>
                 </div>
               </div>
             )}
@@ -1345,9 +1900,13 @@ export default function UserDashboard() {
                   <CheckCircle2 size={28} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>Payout Sent</h3>
+                  <h3 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>Payout Requested</h3>
                   <p style={{ margin: '0.5rem 0 0', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.92rem' }}>
-                    Your funds of <strong>${parseFloat(withdrawForm.amount).toFixed(2)}</strong> are being transferred to PayPal account <strong>{withdrawForm.account}</strong>.
+                    Your payout of <strong>
+                      {userCurrency !== 'USD'
+                        ? formatCurrency(parseFloat(withdrawForm.amount || '0'), userCurrency)
+                        : `$${parseFloat(withdrawForm.amount || '0').toFixed(2)}`}
+                    </strong> via {withdrawMethod === 'paypal' ? 'PayPal' : 'Bank Transfer'} has been logged and is being processed.
                   </p>
                 </div>
                 <button className="btn btn-secondary" onClick={() => setShowWithdrawModal(false)} style={{ borderRadius: '12px', padding: '0.75rem' }}>
@@ -1362,7 +1921,7 @@ export default function UserDashboard() {
 
       {showAddMoneyModal && createPortal(
         <div className="glass-modal-overlay">
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px' }}>
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '460px' }}>
             <div style={{ display: 'grid', gap: '1.2rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -1380,13 +1939,15 @@ export default function UserDashboard() {
               </div>
 
               <div>
-                <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Amount (USD)</label>
+                <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>
+                  Amount ({selectedGateway === 'razorpay' ? 'INR' : 'USD'})
+                </label>
                 <input className="input mono" type="number" min="1" required value={addMoneyAmount} onChange={(event) => setAddMoneyAmount(event.target.value)} style={{ width: '100%', fontSize: '1.2rem', padding: '0.75rem 1rem', marginBottom: '1rem' }} />
               </div>
 
               {/* Quick top-up chips */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                {['500', '1000', '2000', '5000'].map((val) => (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                {(selectedGateway === 'razorpay' ? ['500', '1000', '2000', '5000'] : ['10', '25', '50', '100']).map((val) => (
                   <button
                     key={val}
                     type="button"
@@ -1400,18 +1961,132 @@ export default function UserDashboard() {
                       borderRadius: '10px'
                     }}
                   >
-                    +${val}
+                    {selectedGateway === 'razorpay' ? '₹' : '$'}{val}
                   </button>
                 ))}
               </div>
 
+              {/* Payment method selector — country-aware */}
+              <PaymentMethodSelector
+                selected={selectedGateway}
+                onSelect={setSelectedGateway}
+                disabled={addMoneyLoading}
+                countryCode={userCountryCode}
+                userCurrency={userCurrency}
+              />
+
+              {/* Exchange rate info for non-USD users */}
+              {userCountryCode && userCurrency !== 'USD' && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.6rem 0.85rem',
+                  background: 'rgba(99,91,255,0.06)',
+                  border: '1px solid rgba(99,91,255,0.18)',
+                  borderRadius: '10px',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-3)',
+                }}>
+                  <span>💱</span>
+                  <span>
+                    Amount shown in USD. Your local currency: <strong style={{ color: 'var(--text-1)' }}>{userCurrency}</strong>.
+                    Final charge will be converted at live rates.
+                  </span>
+                </div>
+              )}
+
               <div style={{ position: 'relative', zIndex: 0 }}>
                 {addMoneyLoading && (
-                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.5)', zIndex: 10, display: 'grid', placeItems: 'center', borderRadius: '12px' }}>
-                    <span className="spinner" style={{ width: '2rem', height: '2rem', borderTopColor: 'var(--primary)' }} />
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.15)', backdropFilter: 'blur(4px)', zIndex: 10, display: 'grid', placeItems: 'center', borderRadius: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem' }}>
+                      <span className="spinner" style={{ width: '2rem', height: '2rem', borderTopColor: 'var(--primary)' }} />
+                      <span style={{ fontSize: '0.82rem', color: 'var(--text-2)', fontWeight: 600 }}>Processing…</span>
+                    </div>
                   </div>
                 )}
-                
+
+                {/* ── Razorpay UI ── */}
+                {selectedGateway === 'razorpay' && (
+                  <button
+                    id="razorpay-pay-btn"
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={addMoneyLoading}
+                    onClick={handleRazorpayPayment}
+                    style={{
+                      width: '100%',
+                      padding: '0.85rem 1.5rem',
+                      borderRadius: '12px',
+                      fontWeight: 700,
+                      fontSize: '1rem',
+                      background: 'linear-gradient(135deg, #072654 0%, #1e78ff 100%)',
+                      border: 'none',
+                      color: '#fff',
+                      cursor: addMoneyLoading ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      transition: 'opacity 0.18s',
+                      opacity: addMoneyLoading ? 0.6 : 1,
+                    }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="white" strokeWidth="2"/>
+                      <path d="M8 12L11 15L16 10" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Pay ₹{parseFloat(addMoneyAmount || '0').toFixed(0)} with Razorpay
+                  </button>
+                )}
+
+                {/* ── Stripe UI ── */}
+                {selectedGateway === 'stripe' && (
+                  <div style={{ width: '100%', marginBottom: '1.25rem' }}>
+                    {stripeLoading && (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1.5rem 0', gap: '0.75rem', color: '#635bff' }}>
+                        <div style={{ width: '28px', height: '28px', borderRadius: '50%', border: '3px solid rgba(99,91,255,0.2)', borderTopColor: '#635bff', animation: 'spin 0.8s linear infinite' }} />
+                        <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Loading secure card field...</span>
+                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                      </div>
+                    )}
+                    <div id="stripe-payment-element" style={{ display: stripeLoading ? 'none' : 'block' }} />
+                    <button
+                      id="stripe-pay-btn"
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={addMoneyLoading || stripeLoading}
+                      onClick={handleStripePayment}
+                      style={{
+                        width: '100%',
+                        padding: '0.85rem 1.5rem',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        fontSize: '1rem',
+                        background: 'linear-gradient(135deg, #635bff 0%, #9f98ff 100%)',
+                        border: 'none',
+                        color: '#fff',
+                        cursor: (addMoneyLoading || stripeLoading) ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
+                        transition: 'opacity 0.18s',
+                        opacity: (addMoneyLoading || stripeLoading) ? 0.6 : 1,
+                        marginTop: '1rem',
+                      }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="5" width="20" height="14" rx="2" stroke="white" strokeWidth="2"/>
+                        <path d="M2 10H22" stroke="white" strokeWidth="2"/>
+                      </svg>
+                      Pay ${parseFloat(addMoneyAmount || '0').toFixed(2)} with Stripe
+                    </button>
+                  </div>
+                )}
+
+                {/* ── PayPal UI (original flow preserved) ── */}
+                {selectedGateway === 'paypal' && (
                 <PayPalButtons
                   style={{ layout: "vertical", color: "blue", shape: "rect", label: "pay" }}
                   createOrder={async (_data, actions) => {
@@ -1534,6 +2209,7 @@ export default function UserDashboard() {
                     }
                   }}
                 />
+                )}
               </div>
             </div>
           </div>

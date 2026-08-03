@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   ShoppingBag, Wallet, Activity, CreditCard, LayoutDashboard,
   Users, BookOpen, CheckCircle, UserPlus, Shield, LogOut,
-  Layers, BarChart3, Store, Scan, Zap, MessageCircle
+  Layers, BarChart3, Store, Scan, Zap, MessageCircle, RefreshCw
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -38,6 +39,7 @@ const adminLinks: NavLink[] = [
   { label: 'Settlements', path: '/admin/settlements',     Icon: CheckCircle },
   { label: 'Payouts',     path: '/admin/payouts',         Icon: Wallet },
   { label: 'Support',     path: '/admin/support',         Icon: MessageCircle },
+  { label: 'Rates',       path: '/admin/rates',           Icon: RefreshCw },
   { label: 'Security',    path: '/admin/security',        Icon: Shield },
 ];
 
@@ -120,9 +122,9 @@ export default function TopNav({ portal }: TopNavProps) {
         <LogOut size={16} />
       </button>
 
-      {showConfirmSignOut && (
-        <div className="glass-modal-overlay">
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '360px', textAlign: 'center' }}>
+      {showConfirmSignOut && createPortal(
+        <div className="glass-modal-overlay" style={{ zIndex: 99999 }}>
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '360px', textAlign: 'center', margin: 'auto' }}>
             <h3 style={{ margin: '0 0 0.5rem', color: 'var(--text-1)', fontSize: '1.2rem', fontWeight: 700 }}>Sign Out</h3>
             <p style={{ margin: '0 0 1.5rem', color: 'var(--text-3)', fontSize: '0.9rem' }}>Are you sure you want to sign out of your account?</p>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
@@ -144,7 +146,8 @@ export default function TopNav({ portal }: TopNavProps) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </nav>
   );

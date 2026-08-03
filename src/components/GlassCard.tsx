@@ -46,6 +46,7 @@ export function GlassCard({
 interface DashboardCardProps {
   title: string;
   value: string | number;
+  subValue?: string;
   icon?: React.ReactNode;
   variant?: 'primary' | 'emerald' | 'violet' | 'amber';
   className?: string;
@@ -55,6 +56,7 @@ interface DashboardCardProps {
 export function DashboardCard({
   title,
   value,
+  subValue,
   icon,
   variant = 'primary',
   className = '',
@@ -70,6 +72,11 @@ export function DashboardCard({
       <div style={{ position: 'relative', zIndex: 1 }}>
         <div className="section-label" style={{ marginBottom: '0.25rem' }}>{title}</div>
         <div style={{ fontSize: '1.55rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1.1 }}>{value}</div>
+        {subValue && (
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-3)', marginTop: '0.2rem' }}>
+            {subValue}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1042,14 +1042,22 @@ export async function adminSuspendCompany(companyId: string): Promise<Company> {
   return data;
 }
 
-export async function getUserProfileData(userId: string): Promise<{ wallet_balance: number; paypal_email: string | null }> {
+export async function getUserProfileData(userId: string): Promise<{
+  wallet_balance: number;
+  paypal_email: string | null;
+  country: string | null;
+  country_code: string | null;
+  currency: string | null;
+  timezone: string | null;
+  phone_country_code: string | null;
+}> {
   let data, error;
   
-  // Try fetching both
+  // Try fetching all profile fields including country/currency
   const res1 = await withTimeout(
     supabase
       .from("profiles")
-      .select("wallet_balance, paypal_email")
+      .select("wallet_balance, paypal_email, country, country_code, currency, timezone, phone_country_code")
       .eq("id", userId)
       .maybeSingle(),
     6000
@@ -1058,9 +1066,9 @@ export async function getUserProfileData(userId: string): Promise<{ wallet_balan
   data = res1.data;
   error = res1.error;
 
-  // If it fails (likely due to missing paypal_email column), fallback to just wallet_balance
+  // If it fails (e.g. missing columns), fallback to just wallet_balance
   if (error) {
-    console.warn("Could not fetch paypal_email, column might be missing. Falling back to wallet_balance only.");
+    console.warn("Could not fetch full profile, falling back to wallet_balance only:", error.message);
     const res2 = await withTimeout(
       supabase
         .from("profiles")
@@ -1073,29 +1081,121 @@ export async function getUserProfileData(userId: string): Promise<{ wallet_balan
     error = res2.error;
   }
 
-  // Check localStorage fallback for paypal_email
   const localEmail = localStorage.getItem(`cv_paypal_email_${userId}`);
 
   if (error) throw error;
+
+  // Helper to extract user_metadata fallback if country_code is null in DB
+  const getAuthMetadataFallback = async () => {
+    try {
+      const { data: authUserData } = await supabase.auth.getUser();
+      const meta = authUserData?.user?.user_metadata;
+      if (meta?.country_code || meta?.country) {
+        return {
+          country:            meta.country ?? null,
+          country_code:       meta.country_code ?? null,
+          currency:           meta.currency ?? null,
+          timezone:           meta.timezone ?? null,
+          phone_country_code: meta.phone_country_code ?? null,
+        };
+      }
+    } catch {
+      // Ignore auth metadata fetch error
+    }
+    return null;
+  };
+
   if (data) {
-    const paypalEmail = 'paypal_email' in data ? (data as any).paypal_email : null;
-    return { wallet_balance: data.wallet_balance, paypal_email: paypalEmail || localEmail };
+    let country            = (data as any).country ?? null;
+    let countryCode        = (data as any).country_code ?? null;
+    let currency           = (data as any).currency ?? null;
+    let timezone           = (data as any).timezone ?? null;
+    let phoneCountryCode   = (data as any).phone_country_code ?? null;
+
+    if (!countryCode) {
+      const metaFallback = await getAuthMetadataFallback();
+      if (metaFallback?.country_code) {
+        country          = metaFallback.country;
+        countryCode      = metaFallback.country_code;
+        currency         = metaFallback.currency;
+        timezone         = metaFallback.timezone;
+        phoneCountryCode = metaFallback.phone_country_code;
+
+        // Sync to profiles table in background
+        void updateUserProfile(userId, {
+          country:            country ?? undefined,
+          country_code:       countryCode ?? undefined,
+          currency:           currency ?? undefined,
+          timezone:           timezone ?? undefined,
+          phone_country_code: phoneCountryCode ?? undefined,
+        }).catch(() => {});
+      }
+    }
+
+    return {
+      wallet_balance:     (data as any).wallet_balance ?? 0,
+      paypal_email:       (data as any).paypal_email ?? localEmail ?? null,
+      country,
+      country_code:       countryCode,
+      currency,
+      timezone,
+      phone_country_code: phoneCountryCode,
+    };
   }
   
   // If no profile exists, create one with 0 balance
+  const metaFallback = await getAuthMetadataFallback();
   const { data: newProfile, error: insertError } = await supabase
     .from("profiles")
-    .insert({ id: userId, wallet_balance: 0 })
+    .insert({
+      id:                 userId,
+      wallet_balance:     0,
+      country:            metaFallback?.country ?? null,
+      country_code:       metaFallback?.country_code ?? null,
+      currency:           metaFallback?.currency ?? null,
+      timezone:           metaFallback?.timezone ?? null,
+      phone_country_code: metaFallback?.phone_country_code ?? null,
+    })
     .select("wallet_balance")
     .single();
     
   if (insertError) throw insertError;
-  return { wallet_balance: newProfile?.wallet_balance ?? 0, paypal_email: localEmail };
+  return {
+    wallet_balance:     newProfile?.wallet_balance ?? 0,
+    paypal_email:       localEmail,
+    country:            metaFallback?.country ?? null,
+    country_code:       metaFallback?.country_code ?? null,
+    currency:           metaFallback?.currency ?? null,
+    timezone:           metaFallback?.timezone ?? null,
+    phone_country_code: metaFallback?.phone_country_code ?? null,
+  };
 }
 
 export async function getUserWalletBalance(userId: string): Promise<number> {
   const profile = await getUserProfileData(userId);
   return profile.wallet_balance;
+}
+
+/** Update user's country, currency, and related locale fields */
+export async function updateUserProfile(
+  userId: string,
+  data: {
+    country?: string;
+    country_code?: string;
+    currency?: string;
+    timezone?: string;
+    phone_country_code?: string;
+    paypal_email?: string;
+  }
+): Promise<void> {
+  const { error } = await withTimeout(
+    supabase
+      .from('profiles')
+      .update(data)
+      .eq('id', userId),
+    8000
+  );
+  if (error) throw error;
 }
 
 export async function updateUserPaypalEmail(userId: string, email: string): Promise<void> {

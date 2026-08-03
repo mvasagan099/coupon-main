@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, updateUserProfile } from '../lib/supabase';
 import { Eye, EyeOff } from 'lucide-react';
+import CountrySelector from '../components/CountrySelector';
+import type { CountryInfo } from '../lib/countries';
 
 export function LoginPage() {
   const { user } = useAuth();
@@ -18,6 +20,7 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'info'; text: string } | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<CountryInfo | null>(null);
 
   let loginTitle = 'Welcome back to CouponVault';
   let loginSubtitle = 'Sign in to access your gift cards, balances, and redemptions.';
@@ -127,14 +130,54 @@ export function LoginPage() {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
+        // Country is required for new user registrations
+        if (isUserRoute && !selectedCountry) {
+          setMessage({ type: 'error', text: 'Please select your country to continue.' });
+          setLoading(false);
+          return;
+        }
+
+        const { data: signUpData, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: { role },
+            data: {
+              role,
+              country:            selectedCountry?.name ?? null,
+              country_code:       selectedCountry?.code ?? null,
+              currency:           selectedCountry?.currency ?? null,
+              timezone:           selectedCountry?.timezone ?? null,
+              phone_country_code: selectedCountry?.phoneCode ?? null,
+            },
           },
         });
         if (error) throw error;
+
+        // Supabase returns an empty identities array if an account with this email already exists
+        if (signUpData?.user && signUpData.user.identities && signUpData.user.identities.length === 0) {
+          setMessage({
+            type: 'error',
+            text: 'An account with this email address already exists. Please sign in instead.',
+          });
+          return;
+        }
+
+        // Persist country/currency to the profiles table after sign-up
+        if (signUpData?.user && selectedCountry) {
+          try {
+            await updateUserProfile(signUpData.user.id, {
+              country:            selectedCountry.name,
+              country_code:       selectedCountry.code,
+              currency:           selectedCountry.currency,
+              timezone:           selectedCountry.timezone,
+              phone_country_code: selectedCountry.phoneCode,
+            });
+          } catch (profileErr) {
+            // Non-fatal: profile update can be done later from dashboard
+            console.warn('Could not save country to profile:', profileErr);
+          }
+        }
+
         setMessage({ type: 'info', text: 'Account created! Check your email to confirm, or log in if email confirmation is disabled.' });
       } else {
         let { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -362,6 +405,42 @@ export function LoginPage() {
                 </button>
               </div>
             </div>
+
+            {/* Country selector — shown only in sign-up mode for users */}
+            {isSignUp && isUserRoute && (
+              <div>
+                <label className="label" htmlFor="country-selector">
+                  Country <span style={{ color: 'var(--red)' }}>*</span>
+                </label>
+                <CountrySelector
+                  id="country-selector"
+                  value={selectedCountry?.code}
+                  onChange={setSelectedCountry}
+                  required
+                  placeholder="Search your country…"
+                />
+                {selectedCountry && (
+                  <div style={{
+                    marginTop: '0.5rem',
+                    display: 'flex',
+                    gap: '0.5rem',
+                    flexWrap: 'wrap',
+                    fontSize: '0.78rem',
+                    color: 'var(--text-3)',
+                  }}>
+                    <span style={{ background: 'var(--surface-soft)', padding: '0.2rem 0.6rem', borderRadius: '6px' }}>
+                      💱 Currency: <strong style={{ color: 'var(--text-1)' }}>{selectedCountry.currency}</strong>
+                    </span>
+                    <span style={{ background: 'var(--surface-soft)', padding: '0.2rem 0.6rem', borderRadius: '6px' }}>
+                      📞 {selectedCountry.phoneCode}
+                    </span>
+                    <span style={{ background: 'var(--surface-soft)', padding: '0.2rem 0.6rem', borderRadius: '6px' }}>
+                      🌏 {selectedCountry.timezone}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <button className="btn btn-primary" disabled={loading} type="submit" style={{ width: '100%' }}>
               {loading ? (

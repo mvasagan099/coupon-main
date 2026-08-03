@@ -29,7 +29,9 @@ import {
   sendSupportMessage,
 } from '../lib/supabase';
 
-const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts', 'support'] as const;
+import { COUNTRIES } from '../lib/countries';
+
+const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts', 'support', 'rates'] as const;
 type AdminSection = (typeof validSections)[number];
 
 function isAdminSection(value: string | undefined): value is AdminSection {
@@ -477,6 +479,7 @@ export default function AdminDashboard() {
     settlements: 'Manage monthly merchant settlements',
     payouts: 'Review and process user withdrawal payouts',
     support: 'Manage customer support tickets',
+    rates: 'Exchange rates & multi-currency system',
   };
 
   // Support: filtered tickets
@@ -1520,6 +1523,67 @@ export default function AdminDashboard() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {currentSection === 'rates' && (
+        <div className="glass-card-strong fade-in" style={{ padding: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <span className="section-label">🌍 Global Country & Currency Matrix</span>
+              <h3 style={{ margin: '0.35rem 0 0', fontSize: '1.35rem' }}>Supported Countries ({COUNTRIES.length})</h3>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <span className="badge badge-green">Base: USD ($)</span>
+              <span className="badge badge-purple">Provider: Frankfurter API</span>
+            </div>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table className="premium-table">
+              <thead>
+                <tr>
+                  <th>Country</th>
+                  <th>ISO Code</th>
+                  <th>Currency</th>
+                  <th>Symbol</th>
+                  <th>Phone Code</th>
+                  <th>Timezone</th>
+                  <th>Gateway Routing Priority</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COUNTRIES.map((c) => (
+                  <tr key={c.code}>
+                    <td style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '1.2rem' }}>{c.flag}</span>
+                      <span>{c.name}</span>
+                    </td>
+                    <td className="mono font-medium">{c.code}</td>
+                    <td>
+                      <span className="badge badge-blue">{c.currency}</span>
+                    </td>
+                    <td className="mono" style={{ fontWeight: 700 }}>{c.currencySymbol}</td>
+                    <td className="mono text-muted">{c.phoneCode}</td>
+                    <td className="text-muted" style={{ fontSize: '0.82rem' }}>{c.timezone}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        {c.gatewayPriority.map((gw, idx) => (
+                          <span
+                            key={gw}
+                            className={`badge ${gw === 'paypal' ? 'badge-blue' : gw === 'razorpay' ? 'badge-purple' : 'badge-emerald'}`}
+                            style={{ fontSize: '0.72rem' }}
+                          >
+                            {idx === 0 ? '⭐ ' : ''}{gw}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
