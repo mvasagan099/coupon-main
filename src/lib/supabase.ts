@@ -986,7 +986,8 @@ export async function getUserProfileData(userId: string): Promise<{ wallet_balan
 
   if (error) throw error;
   if (data) {
-    return { wallet_balance: data.wallet_balance, paypal_email: data.paypal_email || localEmail };
+    const paypalEmail = 'paypal_email' in data ? (data as any).paypal_email : null;
+    return { wallet_balance: data.wallet_balance, paypal_email: paypalEmail || localEmail };
   }
   
   // If no profile exists, create one with 0 balance
