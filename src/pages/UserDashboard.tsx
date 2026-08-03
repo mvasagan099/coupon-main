@@ -1020,7 +1020,7 @@ export default function UserDashboard() {
                                 </button>
                               </div>
                             </div>
-                            <span className="badge badge-gray">{voucher.status}</span>
+                            <span className="badge badge-gray">{voucher.is_used || voucher.status === 'redeemed' ? 'USED' : voucher.status}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
                             <div>
