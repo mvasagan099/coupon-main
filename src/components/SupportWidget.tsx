@@ -104,33 +104,38 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
   };
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (isDraggingRef.current) {
         onDragMove(e.clientX, e.clientY);
       }
     };
-    const handleMouseUp = () => {
-      endDrag();
-    };
-    const handleTouchMove = (e: TouchEvent) => {
-      if (isDraggingRef.current && e.touches[0]) {
-        onDragMove(e.touches[0].clientX, e.touches[0].clientY);
-      }
-    };
-    const handleTouchEnd = () => {
+    const handlePointerUp = () => {
       endDrag();
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    window.addEventListener('touchmove', handleTouchMove, { passive: true });
-    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    const handleResize = () => {
+      setPos((prev) => {
+        if (!prev) return prev;
+        const btnWidth = 58;
+        const btnHeight = 58;
+        const padding = 10;
+        return {
+          x: Math.max(padding, Math.min(window.innerWidth - btnWidth - padding, prev.x)),
+          y: Math.max(padding, Math.min(window.innerHeight - btnHeight - padding, prev.y)),
+        };
+      });
+    };
+    window.addEventListener('resize', handleResize);
 
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      window.removeEventListener('resize', handleResize);
     };
   }, []);
 
@@ -240,14 +245,12 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
         ref={buttonRef}
         id="support-widget-btn"
         onClick={handleOpen}
-        onMouseDown={(e) => {
+        onPointerDown={(e) => {
+          // Allow only primary pointer (usually left click or first touch)
           if (e.button !== 0) return;
+          // Capture pointer so it tracks outside the button
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
           startDrag(e.clientX, e.clientY);
-        }}
-        onTouchStart={(e) => {
-          if (e.touches[0]) {
-            startDrag(e.touches[0].clientX, e.touches[0].clientY);
-          }
         }}
         aria-label="Customer Support"
         title="Drag to move, click for support"
@@ -255,7 +258,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
           position: 'fixed',
           ...(pos
             ? { left: `${pos.x}px`, top: `${pos.y}px`, bottom: 'auto', right: 'auto' }
-            : { bottom: '4.75rem', right: '1.75rem' }),
+            : { bottom: '1.5rem', right: '1.5rem' }),
           zIndex: 9000,
           width: '58px',
           height: '58px',
@@ -298,7 +301,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
           position: 'fixed',
           ...(pos
             ? { left: `${pos.x + 42}px`, top: `${pos.y - 2}px`, bottom: 'auto', right: 'auto' }
-            : { bottom: '5.6rem', right: '1.75rem' }),
+            : { bottom: '2.35rem', right: '1.5rem' }),
           zIndex: 9001,
           width: '14px', height: '14px',
           background: '#f43f5e',
@@ -326,9 +329,9 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
                     : { top: `${Math.max(10, pos.y + 68)}px`, bottom: 'auto', maxHeight: `${Math.min(580, window.innerHeight - pos.y - 80)}px` })
                 }
               : {
-                  bottom: '8.5rem',
-                  right: '1.75rem',
-                  maxHeight: 'calc(100vh - 10rem)',
+                  bottom: '5.25rem',
+                  right: '1.5rem',
+                  maxHeight: 'calc(100vh - 6.5rem)',
                 }),
             zIndex: 8999,
             width: 'min(400px, calc(100vw - 2rem))',

@@ -15,13 +15,14 @@ import {
   getRedemptionTransactions,
   getUserGiftCards,
   getUserOrders,
-  getUserWalletBalance,
   purchaseGiftCard,
   createWithdrawal,
   getUserWithdrawals,
   getUserDeposits,
   createPayPalOrder,
-  verifyPayPalPayment
+  verifyPayPalPayment,
+  getUserProfileData,
+  updateUserPaypalEmail
 } from '../lib/supabase';
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
@@ -104,8 +105,11 @@ export default function UserDashboard() {
 
     const syncWalletState = async () => {
       try {
-        const balance = await getUserWalletBalance(user.id);
-        setWalletBalance(balance);
+        const profile = await getUserProfileData(user.id);
+        setWalletBalance(profile.wallet_balance);
+        if (profile.paypal_email) {
+          setWithdrawForm(prev => ({ ...prev, account: profile.paypal_email! }));
+        }
       } catch (err) {
         console.error("Failed to sync wallet state:", err);
       }
@@ -117,8 +121,11 @@ export default function UserDashboard() {
   async function refreshWalletBalance() {
     if (!user?.id) return;
     try {
-      const balance = await getUserWalletBalance(user.id);
-      setWalletBalance(balance);
+      const profile = await getUserProfileData(user.id);
+      setWalletBalance(profile.wallet_balance);
+      if (profile.paypal_email) {
+        setWithdrawForm(prev => ({ ...prev, account: profile.paypal_email! }));
+      }
     } catch (err: unknown) {
       console.warn("Could not fetch wallet balance:", err);
     }
@@ -246,7 +253,8 @@ export default function UserDashboard() {
 
 
 
-  const handleWithdrawalSubmit = async (event: React.FormEvent) => {
+  // Step 1 submit: validate then show confirmation (step 0)
+  const handleWithdrawalSubmit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!user?.id) return;
     const amount = parseFloat(withdrawForm.amount);
@@ -254,6 +262,13 @@ export default function UserDashboard() {
       toastError('Invalid amount', 'Check your wallet balance.');
       return;
     }
+    setWithdrawStep(0); // Show confirmation popup
+  };
+
+  // Step 0 confirm: actually submit the withdrawal
+  const handleWithdrawalConfirm = async () => {
+    if (!user?.id) return;
+    const amount = parseFloat(withdrawForm.amount);
 
     setWithdrawLoading(true);
     setWithdrawStep(2); // Go to PayPal Payouts processing view
@@ -262,8 +277,14 @@ export default function UserDashboard() {
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     try {
+      // Save paypal email if changed/first time
+      try {
+        await updateUserPaypalEmail(user.id, withdrawForm.account);
+      } catch (err) {
+        console.warn("Could not save paypal email:", err);
+      }
+
       // CRIT-05: createWithdrawal records the request server-side and triggers RLS-protected deduction.
-      // We never call updateUserWalletBalance directly.
       await createWithdrawal(user.id, amount, 'PAYPAL', withdrawForm.account);
 
       // Re-sync balance from server (authoritative source)
@@ -273,7 +294,7 @@ export default function UserDashboard() {
       await loadData();
 
       setWithdrawStep(3); // Go to success view
-      success('Payout processed', `PayPal Payout of ₹${amount.toFixed(2)} processed successfully.`);
+      success('Payout processed', `PayPal Payout of $${amount.toFixed(2)} processed successfully.`);
     } catch (err: unknown) {
       setWithdrawStep(1); // Return to form on error
       toastError('Withdrawal error', getErrorMessage(err, 'Failed to process payout.'));
@@ -293,7 +314,7 @@ export default function UserDashboard() {
         date: order.created_at,
         brand: order.company?.name || 'Marketplace purchase',
         type: 'Purchase',
-        amount: `-₹${order.amount.toFixed(2)}`,
+        amount: `-$${order.amount.toFixed(2)}`,
         status: 'Completed',
       });
     });
@@ -303,7 +324,7 @@ export default function UserDashboard() {
         date: redemption.created_at,
         brand: redemption.company_name || 'Merchant',
         type: 'Redemption',
-        amount: `-₹${redemption.amount.toFixed(2)}`,
+        amount: `-$${redemption.amount.toFixed(2)}`,
         status: 'Settled',
       });
     });
@@ -313,7 +334,7 @@ export default function UserDashboard() {
         date: deposit.created_at,
         brand: deposit.payment_method || 'Wallet Top-up',
         type: 'Deposit',
-        amount: `+₹${deposit.amount.toFixed(2)}`,
+        amount: `+$${deposit.amount.toFixed(2)}`,
         status: deposit.status === 'completed' ? 'Completed' : 'Pending',
       });
     });
@@ -323,7 +344,7 @@ export default function UserDashboard() {
         date: w.created_at,
         brand: `Payout (${w.account_number ? '...' + w.account_number.slice(-4) : 'Bank'})`,
         type: 'Withdrawal',
-        amount: `-₹${w.amount.toFixed(2)}`,
+        amount: `-$${w.amount.toFixed(2)}`,
         status: w.status === 'completed' ? 'Completed' : w.status === 'rejected' ? 'Rejected' : 'Pending',
       });
 
@@ -332,7 +353,7 @@ export default function UserDashboard() {
           date: w.updated_at || w.created_at,
           brand: `Refund (Rejected Payout)`,
           type: 'Refund',
-          amount: `+₹${w.amount.toFixed(2)}`,
+          amount: `+$${w.amount.toFixed(2)}`,
           status: 'Completed',
         });
       }
@@ -411,9 +432,9 @@ export default function UserDashboard() {
             </div>
             <select className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => setPriceFilter(event.target.value)}>
               <option value="All">All prices</option>
-              <option value="low">Under ₹500</option>
-              <option value="mid">₹500 - ₹2000</option>
-              <option value="high">Over ₹2000</option>
+              <option value="low">Under $500</option>
+              <option value="mid">$500 - $2000</option>
+              <option value="high">Over $2000</option>
             </select>
           </div>
 
@@ -480,7 +501,7 @@ export default function UserDashboard() {
                         <div style={{ position: 'relative', zIndex: 3 }}>
                           <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
                           <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <Zap size={14} /> ₹{prc.toFixed(2)} now, value ₹{val.toFixed(2)}
+                            <Zap size={14} /> ${prc.toFixed(2)} now, value ${val.toFixed(2)}
                           </div>
                         </div>
                       </div>
@@ -572,10 +593,10 @@ export default function UserDashboard() {
           </div>
 
           <div className="bento-grid fade-in-cards" style={{ marginBottom: '2rem' }}>
-            <DashboardCard title="Wallet balance" value={`₹${walletBalance.toFixed(2)}`} variant="primary" icon={<Wallet size={20} />} />
+            <DashboardCard title="Wallet balance" value={`$${walletBalance.toFixed(2)}`} variant="primary" icon={<Wallet size={20} />} />
             <DashboardCard title="Active cards" value={String(activeVoucherCount)} variant="emerald" icon={<CreditCard size={20} />} />
             <DashboardCard title="Transactions" value={String(combinedTransactions.length)} variant="violet" icon={<ArrowLeftRight size={20} />} />
-            <DashboardCard title="Redeemed value" value={`₹${redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0).toFixed(2)}`} variant="amber" icon={<Gift size={20} />} />
+            <DashboardCard title="Redeemed value" value={`$${redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0).toFixed(2)}`} variant="amber" icon={<Gift size={20} />} />
           </div>
 
           <div className="responsive-grid-2">
@@ -590,7 +611,7 @@ export default function UserDashboard() {
                   </span>
                   <span className="glow-dot" />
                 </div>
-                <div style={{ fontSize: '2.8rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1 }}>₹{walletBalance.toFixed(2)}</div>
+                <div style={{ fontSize: '2.8rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1 }}>${walletBalance.toFixed(2)}</div>
                 <p style={{ color: 'rgba(255,255,255,0.75)', lineHeight: 1.6, marginTop: '0.75rem', fontSize: '0.92rem' }}>
                   Use your stored balance for instant purchases, top up funds, and test wallet flows with the mock gateway.
                 </p>
@@ -622,7 +643,7 @@ export default function UserDashboard() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Redeemed amount</span>
-                  <strong style={{ fontSize: '1.1rem' }}>₹{redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0).toFixed(2)}</strong>
+                  <strong style={{ fontSize: '1.1rem' }}>${redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0).toFixed(2)}</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Recent orders</span>
@@ -660,7 +681,7 @@ export default function UserDashboard() {
                         <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(d.created_at).toLocaleString()}</td>
                         <td style={{ fontWeight: 600 }}>{d.payment_method || 'Wallet Top-up'}</td>
                         <td className="mono text-muted" style={{ fontSize: '0.8rem' }}>{d.reference_id || d.id.slice(0, 10)}</td>
-                        <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>+₹{d.amount.toFixed(2)}</td>
+                        <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>+${d.amount.toFixed(2)}</td>
                         <td>
                           <span className={`badge ${d.status === 'completed' ? 'badge-green' : d.status === 'failed' ? 'badge-red' : 'badge-amber'}`}>
                             {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
@@ -717,7 +738,7 @@ export default function UserDashboard() {
                     {slicedWithdrawals.map((w) => (
                       <tr key={w.id}>
                         <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(w.created_at).toLocaleString()}</td>
-                        <td className="mono font-medium">₹{w.amount.toFixed(2)}</td>
+                        <td className="mono font-medium">${w.amount.toFixed(2)}</td>
                         <td>
                           <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
                             {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
@@ -948,7 +969,7 @@ export default function UserDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.35)' }}>
                             <div>
                               <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>₹{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>${(voucher.remaining_balance ?? 0).toFixed(2)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Expires</div>
@@ -1004,7 +1025,7 @@ export default function UserDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
                             <div>
                               <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>₹{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>${(voucher.remaining_balance ?? 0).toFixed(2)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Expires</div>
@@ -1087,7 +1108,7 @@ export default function UserDashboard() {
                 </button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', color: 'var(--text-3)' }}>
-                <span><strong>₹{(activeVoucher.remaining_balance ?? 0).toFixed(2)}</strong> remaining</span>
+                <span><strong>${(activeVoucher.remaining_balance ?? 0).toFixed(2)}</strong> remaining</span>
                 <span>Expires {new Date(activeVoucher.expiry_date).toLocaleDateString()}</span>
               </div>
             </div>
@@ -1149,15 +1170,15 @@ export default function UserDashboard() {
             <div className="glass-card-strong" style={{ padding: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Face Value</span>
-                <strong>₹{(selectedProduct.value ?? 0).toFixed(2)}</strong>
+                <strong>${(selectedProduct.value ?? 0).toFixed(2)}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Purchase Price</span>
-                <strong style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>₹{(selectedProduct.price ?? 0).toFixed(2)}</strong>
+                <strong style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>${(selectedProduct.price ?? 0).toFixed(2)}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Cashback (10%)</span>
-                <strong style={{ color: '#10b981' }}>+₹{((selectedProduct.value ?? 0) * 0.1).toFixed(2)}</strong>
+                <strong style={{ color: '#10b981' }}>+${((selectedProduct.value ?? 0) * 0.1).toFixed(2)}</strong>
               </div>
             </div>
             {/* Remove name and method fields as they are not used for wallet purchases */}
@@ -1165,7 +1186,7 @@ export default function UserDashboard() {
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
               <div style={{ flex: 1, padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.03)', borderRadius: '14px' }}>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Wallet Balance</div>
-                <strong style={{ fontSize: '1.1rem' }}>₹{walletBalance.toFixed(2)}</strong>
+                <strong style={{ fontSize: '1.1rem' }}>${walletBalance.toFixed(2)}</strong>
               </div>
               <button
                 className="btn btn-primary"
@@ -1209,11 +1230,11 @@ export default function UserDashboard() {
 
                 <div style={{ padding: '1rem', background: 'var(--surface-soft)', borderRadius: '14px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>Available balance</span>
-                  <strong style={{ fontSize: '1.1rem', color: 'var(--text-1)' }}>₹{walletBalance.toFixed(2)}</strong>
+                  <strong style={{ fontSize: '1.1rem', color: 'var(--text-1)' }}>${walletBalance.toFixed(2)}</strong>
                 </div>
 
                 <div>
-                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Amount (INR)</label>
+                  <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Amount (USD)</label>
                   <input className="input mono" type="number" step="0.01" max={walletBalance} required value={withdrawForm.amount} onChange={(event) => setWithdrawForm({ ...withdrawForm, amount: event.target.value })} placeholder="0.00" style={{ width: '100%', fontSize: '1.1rem', padding: '0.75rem 1rem' }} />
                 </div>
                 <div>
@@ -1225,6 +1246,72 @@ export default function UserDashboard() {
                   Confirm Payout
                 </button>
               </form>
+            )}
+
+            {/* ── Step 0: Confirmation popup ─────────────────────────── */}
+            {withdrawStep === 0 && (
+              <div style={{ display: 'grid', gap: '1.4rem' }}>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+                    <ArrowDownLeft size={20} color="white" />
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--primary)' }}>Confirm Withdrawal</span>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700 }}>Review your payout</h3>
+                  </div>
+                </div>
+
+                {/* Amount highlight */}
+                <div style={{ textAlign: 'center', padding: '1.5rem 1rem', background: 'linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.06))', borderRadius: '18px', border: '1.5px solid rgba(99,102,241,0.18)' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-3)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.35rem' }}>Withdrawal Amount</div>
+                  <div style={{ fontSize: '2.4rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'monospace', lineHeight: 1 }}>
+                    ${parseFloat(withdrawForm.amount || '0').toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: '0.4rem' }}>US Dollar</div>
+                </div>
+
+                {/* Email verification row */}
+                <div style={{ padding: '0.9rem 1.1rem', background: 'var(--surface-soft)', borderRadius: '14px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)', marginBottom: '0.3rem' }}>PayPal Account</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <CheckCircle2 size={16} color="#10b981" style={{ flexShrink: 0 }} />
+                    <span style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: '0.9rem', wordBreak: 'break-all' }}>{withdrawForm.account}</span>
+                  </div>
+                </div>
+
+                {/* Info notice */}
+                <div style={{ padding: '1rem 1.1rem', background: 'rgba(245,158,11,0.07)', borderRadius: '14px', border: '1px solid rgba(245,158,11,0.22)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>⏱️</span>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--text-1)', marginBottom: '0.25rem' }}>Processing time: 2–3 hours</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', lineHeight: 1.55 }}>
+                      Once confirmed, the funds will be credited to your PayPal account within <strong>2–3 business hours</strong>. You will receive a confirmation email at <strong>{withdrawForm.account}</strong>.
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: '0.75rem' }}>
+                  <button
+                    className="btn btn-secondary"
+                    type="button"
+                    onClick={() => setWithdrawStep(1)}
+                    style={{ borderRadius: '12px', padding: '0.85rem', fontWeight: 600 }}
+                  >
+                    ← Go Back
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    disabled={withdrawLoading}
+                    onClick={handleWithdrawalConfirm}
+                    style={{ borderRadius: '12px', padding: '0.85rem', fontWeight: 700, fontSize: '0.95rem' }}
+                  >
+                    {withdrawLoading ? <><span className="spinner" /> Processing…</> : 'Confirm & Send'}
+                  </button>
+                </div>
+              </div>
             )}
 
             {withdrawStep === 2 && (
@@ -1245,7 +1332,7 @@ export default function UserDashboard() {
                 <div>
                   <h3 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>Payout Sent</h3>
                   <p style={{ margin: '0.5rem 0 0', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.92rem' }}>
-                    Your funds of <strong>₹{parseFloat(withdrawForm.amount).toFixed(2)}</strong> are being transferred to PayPal account <strong>{withdrawForm.account}</strong>.
+                    Your funds of <strong>${parseFloat(withdrawForm.amount).toFixed(2)}</strong> are being transferred to PayPal account <strong>{withdrawForm.account}</strong>.
                   </p>
                 </div>
                 <button className="btn btn-secondary" onClick={() => setShowWithdrawModal(false)} style={{ borderRadius: '12px', padding: '0.75rem' }}>
@@ -1278,7 +1365,7 @@ export default function UserDashboard() {
               </div>
 
               <div>
-                <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Amount (INR)</label>
+                <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>Amount (USD)</label>
                 <input className="input mono" type="number" min="1" required value={addMoneyAmount} onChange={(event) => setAddMoneyAmount(event.target.value)} style={{ width: '100%', fontSize: '1.2rem', padding: '0.75rem 1rem', marginBottom: '1rem' }} />
               </div>
 
@@ -1298,7 +1385,7 @@ export default function UserDashboard() {
                       borderRadius: '10px'
                     }}
                   >
-                    +₹{val}
+                    +${val}
                   </button>
                 ))}
               </div>
@@ -1421,7 +1508,7 @@ export default function UserDashboard() {
                       // 4. Refresh wallet balance & dashboard state immediately
                       await refreshWalletBalance();
                       await loadData();
-                      success('Funds added', `Successfully added ₹${capturedAmount.toFixed(2)} to your wallet.`);
+                      success('Funds added', `Successfully added $${capturedAmount.toFixed(2)} to your wallet.`);
                       setShowAddMoneyModal(false);
                       setAddMoneyAmount('500');
 

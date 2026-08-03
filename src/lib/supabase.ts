@@ -950,19 +950,43 @@ export async function adminSuspendCompany(companyId: string): Promise<Company> {
   return data;
 }
 
-export async function getUserWalletBalance(userId: string): Promise<number> {
-  const { data, error } = await withTimeout(
+export async function getUserProfileData(userId: string): Promise<{ wallet_balance: number; paypal_email: string | null }> {
+  let data, error;
+  
+  // Try fetching both
+  const res1 = await withTimeout(
     supabase
       .from("profiles")
-      .select("wallet_balance")
+      .select("wallet_balance, paypal_email")
       .eq("id", userId)
       .maybeSingle(),
     6000
   );
+  
+  data = res1.data;
+  error = res1.error;
+
+  // If it fails (likely due to missing paypal_email column), fallback to just wallet_balance
+  if (error) {
+    console.warn("Could not fetch paypal_email, column might be missing. Falling back to wallet_balance only.");
+    const res2 = await withTimeout(
+      supabase
+        .from("profiles")
+        .select("wallet_balance")
+        .eq("id", userId)
+        .maybeSingle(),
+      6000
+    );
+    data = res2.data;
+    error = res2.error;
+  }
+
+  // Check localStorage fallback for paypal_email
+  const localEmail = localStorage.getItem(`cv_paypal_email_${userId}`);
 
   if (error) throw error;
   if (data) {
-    return data.wallet_balance;
+    return { wallet_balance: data.wallet_balance, paypal_email: data.paypal_email || localEmail };
   }
   
   // If no profile exists, create one with 0 balance
@@ -973,7 +997,27 @@ export async function getUserWalletBalance(userId: string): Promise<number> {
     .single();
     
   if (insertError) throw insertError;
-  return newProfile?.wallet_balance ?? 0;
+  return { wallet_balance: newProfile?.wallet_balance ?? 0, paypal_email: localEmail };
+}
+
+export async function getUserWalletBalance(userId: string): Promise<number> {
+  const profile = await getUserProfileData(userId);
+  return profile.wallet_balance;
+}
+
+export async function updateUserPaypalEmail(userId: string, email: string): Promise<void> {
+  // Save to localStorage as a fallback
+  localStorage.setItem(`cv_paypal_email_${userId}`, email);
+  
+  try {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ paypal_email: email })
+      .eq("id", userId);
+    if (error) throw error;
+  } catch (err) {
+    console.warn("Failed to update paypal_email in Supabase, but saved to localStorage:", err);
+  }
 }
 
 // DEPRECATED: Do not use for financial transactions on the frontend
