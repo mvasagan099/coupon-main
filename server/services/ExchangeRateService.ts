@@ -170,9 +170,44 @@ export class ExchangeRateService {
     };
   }
 
+  /**
+   * Fetch exchange rates stored in Supabase `exchange_rates` table
+   */
+  async getRatesFromDB(): Promise<Record<string, number> | null> {
+    if (!this.supabase) return null;
+    try {
+      const { data, error } = await this.supabase
+        .from('exchange_rates')
+        .select('base_currency, target_currency, rate');
+
+      if (error || !data || data.length === 0) return null;
+
+      const rates: Record<string, number> = { [BASE_CURRENCY]: 1 };
+      for (const row of data) {
+        if (row.target_currency && row.rate) {
+          rates[row.target_currency.trim().toUpperCase()] = Number(row.rate);
+        }
+      }
+      return rates;
+    } catch (err: any) {
+      console.warn('[ExchangeRateService] DB fetch error:', err.message);
+      return null;
+    }
+  }
+
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   private async fetchAndCache(): Promise<Record<string, number>> {
+    // 1. Try DB first for currency conversion values
+    const dbRates = await this.getRatesFromDB();
+    if (dbRates && Object.keys(dbRates).length > 1) {
+      const rates = { ...FALLBACK_RATES, ...dbRates, [BASE_CURRENCY]: 1 };
+      this.cache = { rates, fetchedAt: Date.now() };
+      console.log(`[ExchangeRateService] Loaded ${Object.keys(rates).length} exchange rates from database.`);
+      return rates;
+    }
+
+    // 2. If DB is empty, fetch live from API and persist/seed to database
     try {
       const controller = new AbortController();
       const timeout    = setTimeout(() => controller.abort(), 8000);

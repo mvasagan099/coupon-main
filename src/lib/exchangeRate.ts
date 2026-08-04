@@ -1,7 +1,4 @@
-// src/lib/exchangeRate.ts
-// Client-side currency conversion and formatting utilities.
-// Fetches rates from Frankfurter directly (free, no API key).
-// Cache: in-memory, 60-minute TTL.
+import { supabase, isSupabaseConfigured } from './supabase';
 
 const PROVIDER = 'https://api.frankfurter.app';
 const BASE     = 'USD';
@@ -77,12 +74,48 @@ const FALLBACK_RATES: Record<string, number> = {
   GHS: 15.2,
 };
 
+/**
+ * Fetch currency conversion values directly from Supabase database (`exchange_rates` table).
+ */
+export async function fetchRatesFromDatabase(): Promise<Record<string, number> | null> {
+  if (!isSupabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase
+      .from('exchange_rates')
+      .select('base_currency, target_currency, rate');
+
+    if (error || !data || data.length === 0) {
+      return null;
+    }
+
+    const rates: Record<string, number> = { [BASE]: 1 };
+    for (const row of data) {
+      if (row.target_currency && row.rate) {
+        rates[row.target_currency.trim().toUpperCase()] = Number(row.rate);
+      }
+    }
+    return rates;
+  } catch (err) {
+    console.warn('[exchangeRate] Failed to fetch rates from DB:', err);
+    return null;
+  }
+}
+
 async function fetchRates(): Promise<Record<string, number>> {
   if (cache && Date.now() - cache.fetchedAt < TTL_MS) return cache.rates;
   if (fetchPromise) return fetchPromise;
 
   fetchPromise = (async () => {
     try {
+      // 1. Try DB first for currency conversion values
+      const dbRates = await fetchRatesFromDatabase();
+      if (dbRates && Object.keys(dbRates).length > 1) {
+        const rates = { ...FALLBACK_RATES, ...dbRates, [BASE]: 1 };
+        cache = { rates, fetchedAt: Date.now() };
+        return rates;
+      }
+
+      // 2. Fallback to live Frankfurter API
       const res = await fetch(`${PROVIDER}/latest?base=${BASE}`, {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout?.(5000) ?? undefined,
