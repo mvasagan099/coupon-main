@@ -479,4 +479,10 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.redeem_game_coupon(uuid, text, text, text, text, text, text) TO authenticated, anon;
 
+-- Ensure coupons table allows SELECT for verification and redemption API calls
+ALTER TABLE public.coupons ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow select coupons for verification" ON public.coupons;
+CREATE POLICY "Allow select coupons for verification" ON public.coupons FOR SELECT USING (true);
+GRANT SELECT ON public.coupons TO anon, authenticated, service_role;
+
 COMMIT;
