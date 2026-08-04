@@ -90,119 +90,73 @@ export class ExchangeRateService {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /**
-   * Get exchange rate: how many `to` units equal 1 `from` unit.
-   * E.g. getRate('USD', 'INR') → 83.5
+   * Get exchange rate: always 1 (FX conversion disabled)
    */
-  async getRate(from: string, to: string): Promise<number> {
-    if (from.toUpperCase() === to.toUpperCase()) return 1;
-    const rates = await this.getRatesFromUSD();
-
-    // We store rates as USD → X, so:
-    // from→to = rates[to] / rates[from]
-    const fromRate = from.toUpperCase() === BASE_CURRENCY ? 1 : rates[from.toUpperCase()];
-    const toRate   = to.toUpperCase()   === BASE_CURRENCY ? 1 : rates[to.toUpperCase()];
-
-    if (!fromRate || !toRate) {
-      console.warn(`[ExchangeRateService] Unknown currency pair: ${from}→${to}. Defaulting to 1.`);
-      return 1;
-    }
-    return toRate / fromRate;
+  async getRate(_from: string, _to: string): Promise<number> {
+    return 1;
   }
 
   /**
-   * Convert an amount in USD to the target currency.
-   * Returns { amount, rate, formattedRate }.
+   * Convert an amount in USD to the target currency (1:1).
    */
   async convertFromUSD(amountUSD: number, targetCurrency: string): Promise<{
     amount: number;
     rate: number;
     amountUSD: number;
   }> {
-    const rate   = await this.getRate(BASE_CURRENCY, targetCurrency);
-    const amount = this.roundForCurrency(amountUSD * rate, targetCurrency);
-    return { amount, rate, amountUSD };
+    const amount = this.roundForCurrency(amountUSD, targetCurrency);
+    return { amount, rate: 1, amountUSD };
   }
 
   /**
-   * Convert a local currency amount back to USD.
+   * Convert a local currency amount back to USD (1:1).
    */
-  async convertToUSD(amountLocal: number, fromCurrency: string): Promise<{
+  async convertToUSD(amountLocal: number, _fromCurrency: string): Promise<{
     amountUSD: number;
     rate: number;
   }> {
-    const rate      = await this.getRate(fromCurrency, BASE_CURRENCY);
-    const amountUSD = this.roundForCurrency(amountLocal * rate, BASE_CURRENCY);
-    return { amountUSD, rate };
+    const amountUSD = this.roundForCurrency(amountLocal, BASE_CURRENCY);
+    return { amountUSD, rate: 1 };
   }
 
   /**
-   * Returns the full rates map (USD as base). Respects the cache TTL.
+   * Returns rates map where all rates equal 1.
    */
   async getRatesFromUSD(): Promise<Record<string, number>> {
-    // Serve from cache if fresh
-    if (this.cache && (Date.now() - this.cache.fetchedAt) < CACHE_TTL_MS) {
-      return this.cache.rates;
+    const rates: Record<string, number> = {};
+    for (const key of Object.keys(FALLBACK_RATES)) {
+      rates[key] = 1;
     }
-
-    // Deduplicate concurrent calls — only one in-flight fetch at a time
-    if (this.fetchPromise) return this.fetchPromise;
-
-    this.fetchPromise = this.fetchAndCache().finally(() => {
-      this.fetchPromise = null;
-    });
-
-    return this.fetchPromise;
+    rates[BASE_CURRENCY] = 1;
+    return rates;
   }
 
-  /** Force a cache refresh. Returns fresh rates. */
+  /** Force a cache refresh. Returns 1:1 rates map. */
   async forceRefresh(): Promise<Record<string, number>> {
-    this.cache = null;
     return this.getRatesFromUSD();
   }
 
   /** Returns cached rates metadata for admin display */
   getCacheInfo(): { rates: Record<string, number> | null; fetchedAt: Date | null; ageSeconds: number | null } {
-    if (!this.cache) return { rates: null, fetchedAt: null, ageSeconds: null };
     return {
-      rates:       { ...this.cache.rates, [BASE_CURRENCY]: 1 },
-      fetchedAt:   new Date(this.cache.fetchedAt),
-      ageSeconds:  Math.round((Date.now() - this.cache.fetchedAt) / 1000),
+      rates:       { [BASE_CURRENCY]: 1 },
+      fetchedAt:   new Date(),
+      ageSeconds:  0,
     };
   }
 
   /**
-   * Fetch exchange rates stored in Supabase `exchange_rates` table
+   * Fetch exchange rates stub
    */
   async getRatesFromDB(): Promise<Record<string, number> | null> {
-    if (!this.supabase) return null;
-    try {
-      const { data, error } = await this.supabase
-        .from('exchange_rates')
-        .select('base_currency, target_currency, rate');
-
-      if (error || !data || data.length === 0) return null;
-
-      const rates: Record<string, number> = { [BASE_CURRENCY]: 1 };
-      for (const row of data) {
-        if (row.target_currency && row.rate) {
-          rates[row.target_currency.trim().toUpperCase()] = Number(row.rate);
-        }
-      }
-      return rates;
-    } catch (err: any) {
-      console.warn('[ExchangeRateService] DB fetch error:', err.message);
-      return null;
-    }
+    return this.getRatesFromUSD();
   }
 
   /**
-   * Seeds all country currency rates into the Supabase database (`exchange_rates` table).
+   * Seed rates stub
    */
   async seedAllRatesToDatabase(): Promise<Record<string, number>> {
-    const rates = await this.getRatesFromUSD();
-    await this.persistToSupabase(rates);
-    console.log(`[ExchangeRateService] Successfully seeded/persisted ${Object.keys(rates).length} exchange rates to database.`);
-    return rates;
+    return this.getRatesFromUSD();
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────

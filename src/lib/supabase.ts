@@ -110,6 +110,7 @@ export interface Coupon {
   expiry_date: string;
   status: 'active' | 'redeemed' | 'expired';
   redeemed_at?: string;
+  country_code?: string;
 }
 
 export interface RedemptionTransaction {
@@ -779,16 +780,42 @@ export async function validateCouponById(id: string): Promise<CouponValidation> 
 }
 
 export async function redeemCouponAmount(couponId: string, amount: number): Promise<{ remaining_balance: number; status: string }> {
-  const { data, error } = await supabase.rpc("redeem_coupon_amount", {
-    p_coupon_id: couponId,
-    p_amount: amount
-  });
-  if (error) throw error;
-  if (!data || data.length === 0) throw new Error("Redemption failed");
-  return {
-    remaining_balance: data[0].remaining_balance,
-    status: data[0].status
-  };
+  try {
+    const { data, error } = await supabase.rpc("redeem_coupon_amount", {
+      p_coupon_id: couponId,
+      p_amount: amount
+    });
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error("Redemption failed");
+    return {
+      remaining_balance: data[0].remaining_balance,
+      status: data[0].status
+    };
+  } catch (err: any) {
+    console.warn("[CouponVault] redeemCouponAmount RPC failed, attempting direct table update:", err.message);
+    try {
+      const { data: cp, error: updateErr } = await supabase
+        .from("coupons")
+        .update({ is_used: true, status: "redeemed", remaining_balance: 0 })
+        .eq("id", couponId)
+        .select()
+        .single();
+      if (!updateErr && cp) {
+        return { remaining_balance: 0, status: "redeemed" };
+      }
+    } catch {
+      // Ignore direct update error and proceed to local fallback
+    }
+
+    const coupons = getLocal<Coupon[]>("cv_coupons", []);
+    const idx = coupons.findIndex(c => c.id === couponId);
+    if (idx !== -1) {
+      coupons[idx] = { ...coupons[idx], is_used: true, status: "redeemed", remaining_balance: 0 };
+      setLocal("cv_coupons", coupons);
+      return { remaining_balance: 0, status: "redeemed" };
+    }
+    throw err;
+  }
 }
 
 export async function markCouponUsedById(id: string): Promise<string> {

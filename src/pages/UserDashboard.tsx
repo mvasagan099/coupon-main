@@ -1148,48 +1148,78 @@ export default function UserDashboard() {
 
             <div style={{ display: 'grid', gap: '0.75rem' }}>
               <label className="label" style={{ margin: 0 }}>
-                {userCountryCode ? 'Change country' : 'Select your country'}
+                {userCountryCode ? 'Account Country (Locked)' : 'Select your country'}
               </label>
-              <CountrySelector
-                value={profileCountry?.code}
-                onChange={(c) => setProfileCountry(c)}
-                disabled={savingProfile}
-              />
 
-              {profileCountry && profileCountry.code !== userCountryCode && (
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
-                    Will set currency to <strong>{profileCountry.currency}</strong> ({profileCountry.currencySymbol})
+              {userCountryCode && profileCountry ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  padding: '0.8rem 1rem',
+                  borderRadius: '12px',
+                  background: 'var(--surface-soft)',
+                  border: '1.5px solid var(--border)',
+                }}>
+                  <span style={{ fontSize: '1.4rem' }}>{profileCountry.flag}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{profileCountry.name}</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                      Currency: <strong>{profileCountry.currency}</strong> ({profileCountry.currencySymbol})
+                    </div>
+                  </div>
+                  <span className="badge badge-yellow" style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    🔒 Locked
                   </span>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={savingProfile}
-                    onClick={async () => {
-                      if (!user?.id || !profileCountry) return;
-                      setSavingProfile(true);
-                      try {
-                        await updateUserProfile(user.id, {
-                          country:            profileCountry.name,
-                          country_code:       profileCountry.code,
-                          currency:           profileCountry.currency,
-                          timezone:           profileCountry.timezone,
-                          phone_country_code: profileCountry.phoneCode,
-                        });
-                        setUserCountryCode(profileCountry.code);
-                        setUserCurrency(profileCountry.currency);
-                        success('Profile updated', `Country set to ${profileCountry.name}. Currency: ${profileCountry.currency}`);
-                      } catch (err) {
-                        toastError('Update failed', err instanceof Error ? err.message : 'Could not update profile.');
-                      } finally {
-                        setSavingProfile(false);
-                      }
-                    }}
-                    style={{ borderRadius: '10px' }}
-                  >
-                    {savingProfile ? <><span className="spinner" style={{ width: '14px', height: '14px' }} /> Saving…</> : 'Save country'}
-                  </button>
                 </div>
+              ) : (
+                <>
+                  <CountrySelector
+                    value={profileCountry?.code}
+                    onChange={(c) => setProfileCountry(c)}
+                    disabled={savingProfile}
+                  />
+
+                  {profileCountry && !userCountryCode && (
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                        Will set currency to <strong>{profileCountry.currency}</strong> ({profileCountry.currencySymbol})
+                      </span>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={savingProfile}
+                        onClick={async () => {
+                          if (!user?.id || !profileCountry) return;
+                          setSavingProfile(true);
+                          try {
+                            await updateUserProfile(user.id, {
+                              country:            profileCountry.name,
+                              country_code:       profileCountry.code,
+                              currency:           profileCountry.currency,
+                              timezone:           profileCountry.timezone,
+                              phone_country_code: profileCountry.phoneCode,
+                            });
+                            setUserCountryCode(profileCountry.code);
+                            setUserCurrency(profileCountry.currency);
+                            success('Profile updated', `Country set to ${profileCountry.name}. Currency: ${profileCountry.currency}`);
+                          } catch (err) {
+                            toastError('Update failed', err instanceof Error ? err.message : 'Could not update profile.');
+                          } finally {
+                            setSavingProfile(false);
+                          }
+                        }}
+                        style={{ borderRadius: '10px' }}
+                      >
+                        {savingProfile ? <><span className="spinner" style={{ width: '14px', height: '14px' }} /> Saving…</> : 'Set country & lock'}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
+
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', fontStyle: 'italic', marginTop: '0.2rem' }}>
+                ℹ️ Country is set during signup and cannot be changed under any circumstances. If you move to another country, please create a new account.
+              </div>
             </div>
           </div>
 
