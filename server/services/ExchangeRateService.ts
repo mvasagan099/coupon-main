@@ -195,6 +195,16 @@ export class ExchangeRateService {
     }
   }
 
+  /**
+   * Seeds all country currency rates into the Supabase database (`exchange_rates` table).
+   */
+  async seedAllRatesToDatabase(): Promise<Record<string, number>> {
+    const rates = await this.getRatesFromUSD();
+    await this.persistToSupabase(rates);
+    console.log(`[ExchangeRateService] Successfully seeded/persisted ${Object.keys(rates).length} exchange rates to database.`);
+    return rates;
+  }
+
   // ── Private helpers ─────────────────────────────────────────────────────────
 
   private async fetchAndCache(): Promise<Record<string, number>> {

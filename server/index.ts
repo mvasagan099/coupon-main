@@ -828,4 +828,5 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
 app.listen(PORT, () => {
   console.log(`Coupon API Server running on port ${PORT} [${process.env.NODE_ENV ?? 'development'}]`);
+  void exchangeRateService.seedAllRatesToDatabase();
 });
