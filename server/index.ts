@@ -218,23 +218,54 @@ function isSafePositiveNumber(val: unknown, max = 1_000_000): boolean {
   return typeof val === 'number' && Number.isFinite(val) && val > 0 && val <= max;
 }
 
+function normalizeCountryCode(country: unknown): string | null {
+  if (!country || typeof country !== 'string') return null;
+  const cleaned = country.trim().toUpperCase();
+  if (cleaned.length === 0) return null;
+  if (cleaned === 'US' || cleaned === 'IN' || cleaned === 'AU' || cleaned === 'GB' || cleaned === 'AE') return cleaned;
+  
+  const map: Record<string, string> = {
+    'UNITED STATES': 'US',
+    'UNITED STATES OF AMERICA': 'US',
+    'USA': 'US',
+    'INDIA': 'IN',
+    'IND': 'IN',
+    'AUSTRALIA': 'AU',
+    'AUS': 'AU',
+    'UNITED KINGDOM': 'GB',
+    'GREAT BRITAIN': 'GB',
+    'UK': 'GB',
+    'UNITED ARAB EMIRATES': 'AE',
+    'UAE': 'AE',
+    'ARE': 'AE',
+    'CANADA': 'CA',
+    'CAN': 'CA',
+    'GERMANY': 'DE',
+    'DEU': 'DE',
+    'FRANCE': 'FR',
+    'FRA': 'FR',
+  };
+  return map[cleaned] || cleaned.substring(0, 2);
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 // POST /api/v1/coupons/verify
 app.post('/api/v1/coupons/verify', writeLimiter, authenticateAPIKey, async (req, res) => {
   try {
-    const { couponCode } = req.body;
+    const { couponCode, userCountry } = req.body;
 
     if (!isNonEmptyString(couponCode)) {
       return res.status(400).json({ success: false, code: 'INVALID_COUPON', message: 'couponCode is required.' });
     }
 
-    const { data: coupons, error } = await supabase
-      .rpc('verify_game_coupon', { p_code: couponCode.trim().toUpperCase() });
+    const { data: coupon, error: fetchError } = await supabase
+      .from('coupons')
+      .select('id, code, is_used, amount, remaining_balance, status, country_code, issued_to')
+      .ilike('code', couponCode.trim())
+      .maybeSingle();
 
-    const coupon = coupons && coupons.length > 0 ? coupons[0] : null;
-
-    if (error || !coupon) {
+    if (fetchError || !coupon) {
       return res.status(404).json({ success: false, code: 'INVALID_COUPON', message: 'Coupon not found.' });
     }
 
@@ -242,16 +273,48 @@ app.post('/api/v1/coupons/verify', writeLimiter, authenticateAPIKey, async (req,
       return res.status(400).json({ success: false, code: 'REDEEMED', message: 'Coupon already redeemed.' });
     }
 
-    if (coupon.status === 'DISABLED') {
+    if (coupon.status === 'DISABLED' || coupon.status === 'disabled') {
       return res.status(400).json({ success: false, code: 'DISABLED', message: 'Coupon disabled.' });
     }
+
+    // Resolve coupon country code (from coupon record or from profile of issuer)
+    let couponCountryRaw = coupon.country_code;
+    if (!couponCountryRaw && coupon.issued_to) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('country_code, country')
+        .eq('id', coupon.issued_to)
+        .maybeSingle();
+      if (profile) {
+        couponCountryRaw = profile.country_code || profile.country;
+      }
+    }
+
+    const normCouponCountry = normalizeCountryCode(couponCountryRaw);
+    const normUserCountry = normalizeCountryCode(userCountry);
+
+    // Enforce country match strictly if coupon is restricted to a specific country
+    if (normCouponCountry) {
+      if (!normUserCountry || normCouponCountry !== normUserCountry) {
+        return res.status(400).json({
+          success: false,
+          code: 'COUNTRY_MISMATCH',
+          couponCountry: normCouponCountry,
+          userCountry: normUserCountry || null,
+          message: `Country mismatch: This coupon was issued for ${normCouponCountry} and cannot be redeemed by an account in ${normUserCountry || 'a different country'}`
+        });
+      }
+    }
+
+    const effectiveAmount = coupon.amount || coupon.remaining_balance || 0;
 
     return res.json({
       success: true,
       couponId: coupon.id,
-      amount: coupon.amount,
+      amount: effectiveAmount,
       currency: 'INR',
       status: coupon.status || 'ACTIVE',
+      countryCode: normCouponCountry || null,
     });
 
   } catch (err) {
@@ -264,7 +327,7 @@ app.post('/api/v1/coupons/verify', writeLimiter, authenticateAPIKey, async (req,
 // HIGH-05: Validate ALL required fields; amount bounded
 app.post('/api/v1/coupons/redeem', writeLimiter, authenticateAPIKey, async (req, res) => {
   try {
-    const { couponId, userId, gameId, walletTransactionId, ipAddress, device } = req.body;
+    const { couponId, userId, gameId, walletTransactionId, ipAddress, device, userCountry } = req.body;
 
     if (
       !isNonEmptyString(couponId) ||
@@ -275,6 +338,37 @@ app.post('/api/v1/coupons/redeem', writeLimiter, authenticateAPIKey, async (req,
       return res.status(400).json({ success: false, message: 'Missing or invalid required parameters.' });
     }
 
+    const { data: couponRecord } = await supabase
+      .from('coupons')
+      .select('id, country_code, issued_to')
+      .eq('id', couponId)
+      .maybeSingle();
+
+    let couponCountryRaw = couponRecord?.country_code;
+    if (!couponCountryRaw && couponRecord?.issued_to) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('country_code, country')
+        .eq('id', couponRecord.issued_to)
+        .maybeSingle();
+      if (profile) {
+        couponCountryRaw = profile.country_code || profile.country;
+      }
+    }
+
+    const normCouponCountry = normalizeCountryCode(couponCountryRaw);
+    const normUserCountry = normalizeCountryCode(userCountry);
+
+    if (normCouponCountry) {
+      if (!normUserCountry || normCouponCountry !== normUserCountry) {
+        return res.status(400).json({
+          success: false,
+          code: 'COUNTRY_MISMATCH',
+          message: `Country mismatch: This coupon was issued for ${normCouponCountry} and cannot be redeemed by an account in ${normUserCountry || 'a different country'}`
+        });
+      }
+    }
+
     const { data, error } = await supabase.rpc('redeem_game_coupon', {
       p_coupon_id:           couponId,
       p_game_user_id:        userId,
@@ -282,11 +376,17 @@ app.post('/api/v1/coupons/redeem', writeLimiter, authenticateAPIKey, async (req,
       p_wallet_transaction_id: walletTransactionId,
       p_ip_address:          isNonEmptyString(ipAddress) ? ipAddress : '0.0.0.0',
       p_device:              isNonEmptyString(device)    ? device    : 'unknown',
+      p_user_country:        normUserCountry,
     });
 
     if (error) {
       console.error('[/coupons/redeem]', error);
-      return res.status(400).json({ success: false, code: 'REDEEM_FAILED', message: error.message });
+      const isCountryMismatch = error.message.includes('Country mismatch');
+      return res.status(400).json({
+        success: false,
+        code: isCountryMismatch ? 'COUNTRY_MISMATCH' : 'REDEEM_FAILED',
+        message: error.message
+      });
     }
 
     return res.json({ success: true });
@@ -828,5 +928,4 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
 app.listen(PORT, () => {
   console.log(`Coupon API Server running on port ${PORT} [${process.env.NODE_ENV ?? 'development'}]`);
-  void exchangeRateService.seedAllRatesToDatabase();
 });
