@@ -210,6 +210,25 @@ ALTER TABLE public.redemptions ADD COLUMN IF NOT EXISTS remaining_balance_after 
 ALTER TABLE public.redemptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 ALTER TABLE public.redemptions ADD COLUMN IF NOT EXISTS redeemed_at TIMESTAMPTZ DEFAULT now();
 
+-- Coupon Redemptions (For Gaming Hub & Lottery Games)
+CREATE TABLE IF NOT EXISTS public.coupon_redemptions (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  coupon_id             UUID NOT NULL REFERENCES public.coupons(id) ON DELETE CASCADE,
+  game_user_id          TEXT NOT NULL,
+  game_id               TEXT NOT NULL,
+  wallet_transaction_id TEXT NOT NULL,
+  ip_address            TEXT,
+  device                TEXT,
+  status                TEXT NOT NULL DEFAULT 'SUCCESS',
+  redeemed_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_coupon_id ON public.coupon_redemptions(coupon_id);
+ALTER TABLE public.coupon_redemptions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all_coupon_redemptions" ON public.coupon_redemptions;
+CREATE POLICY "allow_all_coupon_redemptions" ON public.coupon_redemptions FOR ALL USING (true);
+GRANT ALL ON public.coupon_redemptions TO anon, authenticated, service_role;
+
 -- Wallet Transfers
 CREATE TABLE IF NOT EXISTS public.wallet_transfers (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -572,6 +591,10 @@ WITH CHECK (
 DROP POLICY IF EXISTS "coupons_user_own" ON public.coupons;
 CREATE POLICY "coupons_user_own" ON public.coupons FOR SELECT USING (issued_to = auth.uid() OR public.is_admin());
 
+DROP POLICY IF EXISTS "Allow select coupons for verification" ON public.coupons;
+CREATE POLICY "Allow select coupons for verification" ON public.coupons FOR SELECT USING (true);
+GRANT SELECT, UPDATE ON public.coupons TO anon, authenticated, service_role;
+
 DROP POLICY IF EXISTS "coupons_admin_all" ON public.coupons;
 CREATE POLICY "coupons_admin_all" ON public.coupons FOR ALL USING (public.is_admin());
 
@@ -716,6 +739,8 @@ $$;
 GRANT EXECUTE ON FUNCTION public.get_gift_cards_with_counts() TO authenticated, anon;
 
 -- issue_gift_card_coupon()
+DROP FUNCTION IF EXISTS public.issue_gift_card_coupon(UUID, UUID, NUMERIC);
+DROP FUNCTION IF EXISTS public.issue_gift_card_coupon(UUID, UUID);
 CREATE OR REPLACE FUNCTION public.issue_gift_card_coupon(
   p_gift_card_id UUID,
   p_user_id      UUID,
@@ -796,6 +821,7 @@ $$;
 GRANT EXECUTE ON FUNCTION public.issue_gift_card_coupon(uuid, uuid, numeric) TO authenticated;
 
 -- add_funds_secure()
+DROP FUNCTION IF EXISTS public.add_funds_secure(UUID, NUMERIC);
 CREATE OR REPLACE FUNCTION public.add_funds_secure(
   p_user_id UUID,
   p_amount NUMERIC
@@ -823,81 +849,147 @@ $$;
 GRANT EXECUTE ON FUNCTION public.add_funds_secure(UUID, NUMERIC) TO service_role, authenticated;
 
 -- validate_coupon()
+DROP FUNCTION IF EXISTS public.validate_coupon(TEXT);
 CREATE OR REPLACE FUNCTION public.validate_coupon(p_code TEXT)
 RETURNS TABLE (
-  valid BOOLEAN,
-  coupon_id UUID,
-  company_id UUID,
-  company_name TEXT,
-  amount NUMERIC,
+  coupon_id         UUID,
+  company_name      TEXT,
+  coupon_code       TEXT,
+  is_used           BOOLEAN,
+  issued_at         TIMESTAMPTZ,
   remaining_balance NUMERIC,
-  status TEXT,
-  error_message TEXT
+  amount            NUMERIC,
+  expiry_date       TIMESTAMPTZ,
+  status            TEXT,
+  country_code      TEXT
 )
 LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_coupon RECORD;
 BEGIN
-  SELECT c.id, c.company_id, comp.name AS company_name, c.amount, c.remaining_balance, c.status, c.is_used, c.expiry_date
-  INTO v_coupon
-  FROM public.coupons c
-  JOIN public.companies comp ON comp.id = c.company_id
-  WHERE c.code = p_code;
+  RETURN QUERY
+  SELECT
+    cu.id AS coupon_id,
+    co.name AS company_name,
+    cu.code AS coupon_code,
+    cu.is_used,
+    cu.created_at AS issued_at,
+    COALESCE(NULLIF(cu.remaining_balance, 0), cu.amount, 0) AS remaining_balance,
+    cu.amount,
+    cu.expiry_date,
+    cu.status,
+    COALESCE(cu.country_code, p.country_code, p.country) AS country_code
+  FROM public.coupons cu
+  JOIN public.companies co ON co.id = cu.company_id
+  LEFT JOIN public.profiles p ON p.id = cu.issued_to
+  WHERE upper(trim(cu.code)) = upper(trim(p_code));
 
   IF NOT FOUND THEN
-    RETURN QUERY SELECT false, NULL::UUID, NULL::UUID, NULL::TEXT, 0::NUMERIC, 0::NUMERIC, 'not_found', 'Coupon code does not exist';
-    RETURN;
+    RAISE EXCEPTION 'Invalid coupon code';
   END IF;
-
-  IF v_coupon.is_used OR v_coupon.remaining_balance <= 0 THEN
-    RETURN QUERY SELECT false, v_coupon.id, v_coupon.company_id, v_coupon.company_name, v_coupon.amount, v_coupon.remaining_balance, 'already_used', 'Coupon has already been fully redeemed';
-    RETURN;
-  END IF;
-
-  IF v_coupon.expiry_date < now() THEN
-    RETURN QUERY SELECT false, v_coupon.id, v_coupon.company_id, v_coupon.company_name, v_coupon.amount, v_coupon.remaining_balance, 'expired', 'Coupon has expired';
-    RETURN;
-  END IF;
-
-  RETURN QUERY SELECT true, v_coupon.id, v_coupon.company_id, v_coupon.company_name, v_coupon.amount, v_coupon.remaining_balance, v_coupon.status, NULL::TEXT;
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.validate_coupon(text) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.validate_coupon(text) TO authenticated, anon, service_role;
 
--- redeem_coupon_amount()
-CREATE OR REPLACE FUNCTION public.redeem_coupon_amount(p_coupon_id UUID, p_amount NUMERIC)
-RETURNS TABLE (success BOOLEAN, new_remaining NUMERIC, error_message TEXT)
+-- validate_coupon_by_id()
+DROP FUNCTION IF EXISTS public.validate_coupon_by_id(UUID);
+CREATE OR REPLACE FUNCTION public.validate_coupon_by_id(p_coupon_id UUID)
+RETURNS TABLE (
+  coupon_id         UUID,
+  company_name      TEXT,
+  coupon_code       TEXT,
+  is_used           BOOLEAN,
+  issued_at         TIMESTAMPTZ,
+  remaining_balance NUMERIC,
+  amount            NUMERIC,
+  expiry_date       TIMESTAMPTZ,
+  status            TEXT,
+  country_code      TEXT
+)
 LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_current_rem NUMERIC;
 BEGIN
-  SELECT remaining_balance INTO v_current_rem
-  FROM public.coupons WHERE id = p_coupon_id FOR UPDATE;
+  RETURN QUERY
+  SELECT
+    cu.id AS coupon_id,
+    co.name::TEXT AS company_name,
+    cu.code::TEXT AS coupon_code,
+    cu.is_used,
+    cu.created_at AS issued_at,
+    COALESCE(NULLIF(cu.remaining_balance, 0), cu.amount, 0) AS remaining_balance,
+    cu.amount,
+    cu.expiry_date,
+    cu.status,
+    COALESCE(cu.country_code, p.country_code, p.country) AS country_code
+  FROM public.coupons cu
+  JOIN public.companies co ON co.id = cu.company_id
+  LEFT JOIN public.profiles p ON p.id = cu.issued_to
+  WHERE cu.id = p_coupon_id;
 
   IF NOT FOUND THEN
-    RETURN QUERY SELECT false, 0::NUMERIC, 'Coupon not found';
-    RETURN;
+    RAISE EXCEPTION 'Invalid coupon ID';
+  END IF;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.validate_coupon_by_id(uuid) TO authenticated, anon, service_role;
+
+-- redeem_coupon_amount()
+DROP FUNCTION IF EXISTS public.redeem_coupon_amount(UUID, NUMERIC);
+CREATE OR REPLACE FUNCTION public.redeem_coupon_amount(p_coupon_id UUID, p_amount NUMERIC)
+RETURNS TABLE (remaining_balance NUMERIC, status TEXT)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_remaining_balance NUMERIC;
+  v_status            TEXT;
+  v_expiry_date       TIMESTAMPTZ;
+  v_is_used           BOOLEAN;
+BEGIN
+  SELECT coupons.remaining_balance, coupons.status, coupons.expiry_date, coupons.is_used
+  INTO v_remaining_balance, v_status, v_expiry_date, v_is_used
+  FROM public.coupons
+  WHERE id = p_coupon_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Coupon not found';
   END IF;
 
-  IF v_current_rem < p_amount THEN
-    RETURN QUERY SELECT false, v_current_rem, 'Insufficient coupon balance';
-    RETURN;
+  IF v_status = 'redeemed' OR v_is_used THEN
+    RAISE EXCEPTION 'Coupon is already fully redeemed';
+  END IF;
+
+  IF v_expiry_date < now() THEN
+    UPDATE public.coupons SET status = 'expired' WHERE id = p_coupon_id;
+    RAISE EXCEPTION 'Coupon has expired';
+  END IF;
+
+  IF v_remaining_balance < p_amount THEN
+    RAISE EXCEPTION 'Insufficient coupon balance. Available balance: %', v_remaining_balance;
+  END IF;
+
+  v_remaining_balance := v_remaining_balance - p_amount;
+  IF v_remaining_balance <= 0 THEN
+    v_status := 'redeemed';
+    v_is_used := true;
+  ELSE
+    v_status := 'active';
+    v_is_used := false;
   END IF;
 
   UPDATE public.coupons
-  SET remaining_balance = remaining_balance - p_amount,
-      is_used = (remaining_balance - p_amount <= 0)
+  SET remaining_balance = v_remaining_balance,
+      status = v_status,
+      is_used = v_is_used,
+      redeemed_at = CASE WHEN v_is_used THEN now() ELSE redeemed_at END
   WHERE id = p_coupon_id;
 
-  INSERT INTO public.redemptions (coupon_id, user_id, amount)
-  VALUES (p_coupon_id, auth.uid(), p_amount);
+  INSERT INTO public.redemptions (coupon_id, user_id, amount, remaining_balance_after)
+  VALUES (p_coupon_id, auth.uid(), p_amount, v_remaining_balance);
 
-  RETURN QUERY SELECT true, (v_current_rem - p_amount), NULL::TEXT;
+  RETURN QUERY SELECT v_remaining_balance, v_status;
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.redeem_coupon_amount(uuid, numeric) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.redeem_coupon_amount(uuid, numeric) TO authenticated, anon, service_role;
 
 -- transfer_winnings_to_wallet()
+DROP FUNCTION IF EXISTS public.transfer_winnings_to_wallet(TEXT, NUMERIC, TEXT);
 CREATE OR REPLACE FUNCTION public.transfer_winnings_to_wallet(
   p_user_email TEXT,
   p_amount NUMERIC,
@@ -928,6 +1020,149 @@ BEGIN
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.transfer_winnings_to_wallet(text, numeric, text) TO authenticated, service_role;
+
+-- normalize_country_code()
+CREATE OR REPLACE FUNCTION public.normalize_country_code(p_country TEXT)
+RETURNS TEXT LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  v_clean TEXT;
+BEGIN
+  IF p_country IS NULL OR trim(p_country) = '' THEN
+    RETURN NULL;
+  END IF;
+  v_clean := upper(trim(p_country));
+  IF length(v_clean) = 2 THEN
+    RETURN v_clean;
+  END IF;
+
+  CASE v_clean
+    WHEN 'UNITED STATES', 'UNITED STATES OF AMERICA', 'USA' THEN RETURN 'US';
+    WHEN 'INDIA', 'IND' THEN RETURN 'IN';
+    WHEN 'AUSTRALIA', 'AUS' THEN RETURN 'AU';
+    WHEN 'UNITED KINGDOM', 'GREAT BRITAIN', 'UK', 'GBR' THEN RETURN 'GB';
+    WHEN 'CANADA', 'CAN' THEN RETURN 'CA';
+    WHEN 'GERMANY', 'DEU' THEN RETURN 'DE';
+    WHEN 'FRANCE', 'FRA' THEN RETURN 'FR';
+    ELSE RETURN substring(v_clean from 1 for 2);
+  END CASE;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.normalize_country_code(TEXT) TO anon, authenticated, service_role;
+
+-- verify_game_coupon()
+DROP FUNCTION IF EXISTS public.verify_game_coupon(TEXT);
+CREATE OR REPLACE FUNCTION public.verify_game_coupon(p_code TEXT)
+RETURNS TABLE (
+  id UUID,
+  code TEXT,
+  is_used BOOLEAN,
+  amount NUMERIC,
+  status TEXT,
+  country_code TEXT
+)
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    c.id,
+    c.code,
+    c.is_used,
+    COALESCE(NULLIF(c.amount, 0), c.remaining_balance, 0) AS amount,
+    c.status,
+    public.normalize_country_code(COALESCE(c.country_code, p.country_code, p.country)) AS country_code
+  FROM public.coupons c
+  LEFT JOIN public.profiles p ON p.id = c.issued_to
+  WHERE upper(trim(c.code)) = upper(trim(p_code));
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.verify_game_coupon(TEXT) TO authenticated, anon, service_role;
+
+-- redeem_game_coupon()
+DROP FUNCTION IF EXISTS public.redeem_game_coupon(UUID, TEXT, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.redeem_game_coupon(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
+
+CREATE OR REPLACE FUNCTION public.redeem_game_coupon(
+  p_coupon_id UUID,
+  p_game_user_id TEXT,
+  p_game_id TEXT,
+  p_wallet_transaction_id TEXT,
+  p_ip_address TEXT,
+  p_device TEXT,
+  p_user_country TEXT DEFAULT NULL
+)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_is_used         BOOLEAN;
+  v_status          TEXT;
+  v_coupon_country  TEXT;
+  v_user_country    TEXT;
+  v_user_uuid       UUID;
+  v_issued_to       UUID;
+BEGIN
+  SELECT is_used, status, country_code, issued_to
+  INTO v_is_used, v_status, v_coupon_country, v_issued_to
+  FROM public.coupons
+  WHERE id = p_coupon_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Coupon not found';
+  END IF;
+
+  IF v_is_used THEN
+    RAISE EXCEPTION 'Coupon already redeemed';
+  END IF;
+
+  IF v_status = 'DISABLED' OR v_status = 'disabled' THEN
+    RAISE EXCEPTION 'Coupon disabled';
+  END IF;
+
+  -- Resolve coupon country
+  IF (v_coupon_country IS NULL OR trim(v_coupon_country) = '') AND v_issued_to IS NOT NULL THEN
+    SELECT COALESCE(country_code, country) INTO v_coupon_country
+    FROM public.profiles
+    WHERE id = v_issued_to;
+  END IF;
+
+  v_coupon_country := public.normalize_country_code(v_coupon_country);
+  v_user_country   := public.normalize_country_code(p_user_country);
+
+  -- Fallback: resolve user country from profiles table if UUID passed
+  IF (v_user_country IS NULL) THEN
+    BEGIN
+      v_user_uuid := p_game_user_id::UUID;
+      SELECT public.normalize_country_code(COALESCE(country_code, country)) INTO v_user_country
+      FROM public.profiles
+      WHERE id = v_user_uuid;
+    EXCEPTION WHEN OTHERS THEN
+      v_user_country := NULL;
+    END;
+  END IF;
+
+  -- Enforce country match only if coupon is country-restricted
+  IF v_coupon_country IS NOT NULL THEN
+    IF v_user_country IS NOT NULL AND v_coupon_country <> v_user_country THEN
+      RAISE EXCEPTION 'Country mismatch: This coupon was issued for % and cannot be redeemed by an account in %', v_coupon_country, v_user_country;
+    END IF;
+  END IF;
+
+  -- Mark coupon as redeemed
+  UPDATE public.coupons
+  SET is_used = true,
+      remaining_balance = 0,
+      status = 'redeemed',
+      redeemed_at = now()
+  WHERE id = p_coupon_id;
+
+  -- Log redemption record
+  INSERT INTO public.coupon_redemptions (
+    coupon_id, game_user_id, game_id, wallet_transaction_id, ip_address, device, status
+  ) VALUES (
+    p_coupon_id, p_game_user_id, p_game_id, p_wallet_transaction_id, p_ip_address, p_device, 'SUCCESS'
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.redeem_game_coupon(uuid, text, text, text, text, text, text) TO authenticated, anon, service_role;
 
 -- admin_get_withdrawals()
 DROP FUNCTION IF EXISTS public.admin_get_withdrawals();
@@ -1198,84 +1433,14 @@ VALUES
 ON CONFLICT (base_curr, target_curr) DO UPDATE SET rate = EXCLUDED.rate;
 
 -- Seed / Guarantee Default Admin Account (admin@123.com / admin@123)
--- Clean all NULL token columns across auth.users to prevent GoTrue "Database error querying schema"
-UPDATE auth.users
-SET 
-  confirmation_token          = COALESCE(confirmation_token, ''),
-  recovery_token              = COALESCE(recovery_token, ''),
-  email_change_token_new      = COALESCE(email_change_token_new, ''),
-  email_change_token_current  = COALESCE(email_change_token_current, ''),
-  email_change                = COALESCE(email_change, ''),
-  phone_change                = COALESCE(phone_change, ''),
-  phone_change_token          = COALESCE(phone_change_token, ''),
-  reauthentication_token      = COALESCE(reauthentication_token, ''),
-  email_change_confirm_status = COALESCE(email_change_confirm_status, 0),
-  is_sso_user                 = COALESCE(is_sso_user, false),
-  is_anonymous                = COALESCE(is_anonymous, false),
-  is_super_admin              = COALESCE(is_super_admin, false);
-
 DO $$
 DECLARE
   v_admin_id uuid;
 BEGIN
-  SELECT id INTO v_admin_id FROM auth.users WHERE email = 'admin@123.com';
-
-  IF v_admin_id IS NULL THEN
-    v_admin_id := gen_random_uuid();
-    INSERT INTO auth.users (
-      id,
-      instance_id,
-      email,
-      encrypted_password,
-      email_confirmed_at,
-      raw_app_meta_data,
-      raw_user_meta_data,
-      created_at,
-      updated_at,
-      role,
-      aud,
-      confirmation_token,
-      recovery_token,
-      email_change_token_new,
-      email_change_token_current,
-      email_change,
-      phone_change,
-      phone_change_token,
-      reauthentication_token,
-      email_change_confirm_status,
-      is_sso_user,
-      is_anonymous,
-      is_super_admin
-    ) VALUES (
-      v_admin_id,
-      '00000000-0000-0000-0000-000000000000',
-      'admin@123.com',
-      crypt('admin@123', gen_salt('bf')),
-      now(),
-      '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
-      '{"role":"admin","full_name":"Master Admin"}'::jsonb,
-      now(),
-      now(),
-      'authenticated',
-      'authenticated',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      0,
-      false,
-      false,
-      false
-    );
-  ELSE
+  -- 1. Try cleaning NULL token columns safely
+  BEGIN
     UPDATE auth.users
     SET 
-      encrypted_password          = crypt('admin@123', gen_salt('bf')),
-      email_confirmed_at          = now(),
       confirmation_token          = COALESCE(confirmation_token, ''),
       recovery_token              = COALESCE(recovery_token, ''),
       email_change_token_new      = COALESCE(email_change_token_new, ''),
@@ -1284,210 +1449,121 @@ BEGIN
       phone_change                = COALESCE(phone_change, ''),
       phone_change_token          = COALESCE(phone_change_token, ''),
       reauthentication_token      = COALESCE(reauthentication_token, ''),
-      raw_app_meta_data           = jsonb_build_object('provider', 'email', 'providers', array['email'], 'role', 'admin'),
-      raw_user_meta_data          = jsonb_build_object('role', 'admin', 'full_name', 'Master Admin')
-    WHERE id = v_admin_id;
-  END IF;
+      email_change_confirm_status = COALESCE(email_change_confirm_status, 0),
+      is_sso_user                 = COALESCE(is_sso_user, false),
+      is_anonymous                = COALESCE(is_anonymous, false),
+      is_super_admin              = COALESCE(is_super_admin, false);
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Skipped auth token cleanup: %', SQLERRM;
+  END;
 
-  -- Ensure matching row exists in auth.identities
-  IF NOT EXISTS (SELECT 1 FROM auth.identities WHERE user_id = v_admin_id) THEN
-    BEGIN
-      INSERT INTO auth.identities (
+  -- 2. Try creating or updating admin@123.com
+  BEGIN
+    SELECT id INTO v_admin_id FROM auth.users WHERE email = 'admin@123.com';
+
+    IF v_admin_id IS NULL THEN
+      v_admin_id := gen_random_uuid();
+      INSERT INTO auth.users (
         id,
-        user_id,
-        identity_data,
-        provider,
-        provider_id,
-        last_sign_in_at,
+        instance_id,
+        email,
+        encrypted_password,
+        email_confirmed_at,
+        raw_app_meta_data,
+        raw_user_meta_data,
         created_at,
-        updated_at
+        updated_at,
+        role,
+        aud,
+        confirmation_token,
+        recovery_token,
+        email_change_token_new,
+        email_change_token_current,
+        email_change,
+        phone_change,
+        phone_change_token,
+        reauthentication_token,
+        email_change_confirm_status,
+        is_sso_user,
+        is_anonymous,
+        is_super_admin
       ) VALUES (
         v_admin_id,
-        v_admin_id,
-        jsonb_build_object('sub', v_admin_id::text, 'email', 'admin@123.com'),
-        'email',
-        v_admin_id::text,
+        '00000000-0000-0000-0000-000000000000',
+        'admin@123.com',
+        crypt('admin@123', gen_salt('bf')),
+        now(),
+        '{"provider":"email","providers":["email"],"role":"admin"}'::jsonb,
+        '{"role":"admin","full_name":"Master Admin"}'::jsonb,
         now(),
         now(),
-        now()
+        'authenticated',
+        'authenticated',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        0,
+        false,
+        false,
+        false
       );
-    EXCEPTION WHEN OTHERS THEN NULL; END;
-  END IF;
-
-  INSERT INTO public.profiles (id, email, role, wallet_balance)
-  VALUES (v_admin_id, 'admin@123.com', 'admin', 999999.00)
-  ON CONFLICT (id) DO UPDATE SET
-    role = 'admin',
-    email = 'admin@123.com';
-END $$;
-
--- =============================================================================
--- GAMING HUB & LOTTERY GAME REDEMPTIONS
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS public.coupon_redemptions (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  coupon_id             UUID NOT NULL REFERENCES public.coupons(id) ON DELETE CASCADE,
-  game_user_id          TEXT NOT NULL,
-  game_id               TEXT NOT NULL,
-  wallet_transaction_id TEXT NOT NULL,
-  ip_address            TEXT,
-  device                TEXT,
-  status                TEXT NOT NULL DEFAULT 'SUCCESS',
-  redeemed_at           TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_coupon_id ON public.coupon_redemptions(coupon_id);
-ALTER TABLE public.coupon_redemptions ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "allow_all_coupon_redemptions" ON public.coupon_redemptions;
-CREATE POLICY "allow_all_coupon_redemptions" ON public.coupon_redemptions FOR ALL USING (true);
-GRANT ALL ON public.coupon_redemptions TO anon, authenticated, service_role;
-
--- Country Normalizer
-CREATE OR REPLACE FUNCTION public.normalize_country_code(p_country TEXT)
-RETURNS TEXT LANGUAGE plpgsql IMMUTABLE AS $$
-DECLARE
-  v_clean TEXT;
-BEGIN
-  IF p_country IS NULL OR trim(p_country) = '' THEN
-    RETURN NULL;
-  END IF;
-  v_clean := upper(trim(p_country));
-  IF length(v_clean) = 2 THEN
-    RETURN v_clean;
-  END IF;
-
-  CASE v_clean
-    WHEN 'UNITED STATES', 'UNITED STATES OF AMERICA', 'USA' THEN RETURN 'US';
-    WHEN 'INDIA', 'IND' THEN RETURN 'IN';
-    WHEN 'AUSTRALIA', 'AUS' THEN RETURN 'AU';
-    WHEN 'UNITED KINGDOM', 'GREAT BRITAIN', 'UK', 'GBR' THEN RETURN 'GB';
-    WHEN 'CANADA', 'CAN' THEN RETURN 'CA';
-    WHEN 'GERMANY', 'DEU' THEN RETURN 'DE';
-    WHEN 'FRANCE', 'FRA' THEN RETURN 'FR';
-    ELSE RETURN substring(v_clean from 1 for 2);
-  END CASE;
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.normalize_country_code(TEXT) TO anon, authenticated, service_role;
-
--- Verify Game Coupon Function
-DROP FUNCTION IF EXISTS public.verify_game_coupon(TEXT);
-CREATE OR REPLACE FUNCTION public.verify_game_coupon(p_code TEXT)
-RETURNS TABLE (
-  id UUID,
-  code TEXT,
-  is_used BOOLEAN,
-  amount NUMERIC,
-  status TEXT,
-  country_code TEXT
-)
-LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  RETURN QUERY
-  SELECT
-    c.id,
-    c.code,
-    c.is_used,
-    COALESCE(NULLIF(c.amount, 0), c.remaining_balance, 0) AS amount,
-    c.status,
-    public.normalize_country_code(COALESCE(c.country_code, p.country_code, p.country)) AS country_code
-  FROM public.coupons c
-  LEFT JOIN public.profiles p ON p.id = c.issued_to
-  WHERE upper(trim(c.code)) = upper(trim(p_code));
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.verify_game_coupon(TEXT) TO authenticated, anon, service_role;
-
--- Redeem Game Coupon Procedure
-DROP FUNCTION IF EXISTS public.redeem_game_coupon(UUID, TEXT, TEXT, TEXT, TEXT, TEXT);
-DROP FUNCTION IF EXISTS public.redeem_game_coupon(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
-
-CREATE OR REPLACE FUNCTION public.redeem_game_coupon(
-  p_coupon_id UUID,
-  p_game_user_id TEXT,
-  p_game_id TEXT,
-  p_wallet_transaction_id TEXT,
-  p_ip_address TEXT,
-  p_device TEXT,
-  p_user_country TEXT DEFAULT NULL
-)
-RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_is_used         BOOLEAN;
-  v_status          TEXT;
-  v_coupon_country  TEXT;
-  v_user_country    TEXT;
-  v_user_uuid       UUID;
-  v_issued_to       UUID;
-BEGIN
-  SELECT is_used, status, country_code, issued_to
-  INTO v_is_used, v_status, v_coupon_country, v_issued_to
-  FROM public.coupons
-  WHERE id = p_coupon_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Coupon not found';
-  END IF;
-
-  IF v_is_used THEN
-    RAISE EXCEPTION 'Coupon already redeemed';
-  END IF;
-
-  IF v_status = 'DISABLED' OR v_status = 'disabled' THEN
-    RAISE EXCEPTION 'Coupon disabled';
-  END IF;
-
-  -- Resolve coupon country
-  IF (v_coupon_country IS NULL OR trim(v_coupon_country) = '') AND v_issued_to IS NOT NULL THEN
-    SELECT COALESCE(country_code, country) INTO v_coupon_country
-    FROM public.profiles
-    WHERE id = v_issued_to;
-  END IF;
-
-  v_coupon_country := public.normalize_country_code(v_coupon_country);
-  v_user_country   := public.normalize_country_code(p_user_country);
-
-  IF (v_user_country IS NULL) THEN
-    BEGIN
-      v_user_uuid := p_game_user_id::UUID;
-      SELECT public.normalize_country_code(COALESCE(country_code, country)) INTO v_user_country
-      FROM public.profiles
-      WHERE id = v_user_uuid;
-    EXCEPTION WHEN OTHERS THEN
-      v_user_country := NULL;
-    END;
-  END IF;
-
-  IF v_coupon_country IS NOT NULL AND v_user_country IS NOT NULL THEN
-    IF v_coupon_country <> v_user_country THEN
-      RAISE EXCEPTION 'Country mismatch: This coupon was issued for % and cannot be redeemed by an account in %', v_coupon_country, v_user_country;
+    ELSE
+      UPDATE auth.users
+      SET 
+        encrypted_password          = crypt('admin@123', gen_salt('bf')),
+        email_confirmed_at          = now(),
+        confirmation_token          = COALESCE(confirmation_token, ''),
+        recovery_token              = COALESCE(recovery_token, ''),
+        email_change_token_new      = COALESCE(email_change_token_new, ''),
+        email_change_token_current  = COALESCE(email_change_token_current, ''),
+        email_change                = COALESCE(email_change, ''),
+        phone_change                = COALESCE(phone_change, ''),
+        phone_change_token          = COALESCE(phone_change_token, ''),
+        reauthentication_token      = COALESCE(reauthentication_token, ''),
+        raw_app_meta_data           = jsonb_build_object('provider', 'email', 'providers', array['email'], 'role', 'admin'),
+        raw_user_meta_data          = jsonb_build_object('role', 'admin', 'full_name', 'Master Admin')
+      WHERE id = v_admin_id;
     END IF;
-  END IF;
 
-  UPDATE public.coupons
-  SET is_used = true,
-      remaining_balance = 0,
-      status = 'redeemed',
-      redeemed_at = now()
-  WHERE id = p_coupon_id;
+    -- Ensure matching row exists in auth.identities
+    IF NOT EXISTS (SELECT 1 FROM auth.identities WHERE user_id = v_admin_id) THEN
+      BEGIN
+        INSERT INTO auth.identities (
+          id,
+          user_id,
+          identity_data,
+          provider,
+          provider_id,
+          last_sign_in_at,
+          created_at,
+          updated_at
+        ) VALUES (
+          v_admin_id,
+          v_admin_id,
+          jsonb_build_object('sub', v_admin_id::text, 'email', 'admin@123.com'),
+          'email',
+          v_admin_id::text,
+          now(),
+          now(),
+          now()
+        );
+      EXCEPTION WHEN OTHERS THEN NULL; END;
+    END IF;
 
-  INSERT INTO public.coupon_redemptions (
-    coupon_id, game_user_id, game_id, wallet_transaction_id, ip_address, device, status
-  ) VALUES (
-    p_coupon_id, p_game_user_id, p_game_id, p_wallet_transaction_id, p_ip_address, p_device, 'SUCCESS'
-  );
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.redeem_game_coupon(uuid, text, text, text, text, text, text) TO authenticated, anon, service_role;
-
--- Ensure coupons table has public SELECT & UPDATE policy for verification & redemption
-ALTER TABLE public.coupons ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow select coupons for verification" ON public.coupons;
-CREATE POLICY "Allow select coupons for verification" ON public.coupons FOR SELECT USING (true);
-GRANT SELECT, UPDATE ON public.coupons TO anon, authenticated, service_role;
+    INSERT INTO public.profiles (id, email, role, wallet_balance)
+    VALUES (v_admin_id, 'admin@123.com', 'admin', 999999.00)
+    ON CONFLICT (id) DO UPDATE SET
+      role = 'admin',
+      email = 'admin@123.com';
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Skipped admin user creation: %', SQLERRM;
+  END;
+END $$;
 
 -- Reload Supabase PostgREST Schema Cache
 NOTIFY pgrst, 'reload schema';

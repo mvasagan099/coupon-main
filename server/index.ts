@@ -26,8 +26,9 @@ for (const key of REQUIRED_ENV) {
 // M-5 FIX: Enforce minimum entropy on the API key.
 // A short or guessable key passes the presence check above but is still
 // trivially brute-forced — reject at startup before any traffic arrives.
-if (process.env.API_KEY!.length < 16) {
-  console.error('FATAL: API_KEY must be at least 16 characters.');
+if (process.env.API_KEY!.length < 32) {
+  console.error('FATAL: API_KEY must be at least 32 characters of high-entropy random data.');
+  console.error('Generate one with: node -e "console.log(require(\"crypto\").randomBytes(32).toString(\"hex\"))"');
   process.exit(1);
 }
 
@@ -51,43 +52,21 @@ app.use(helmet({
   },
 }) as express.RequestHandler);
 
-// CRIT-06: Strict CORS allowlist with support for configured origins & Render deployments
-const defaultOrigins = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://127.0.0.1:5173',
-  'https://coupon-frontend-e8b3.onrender.com'
-];
-
-const configuredOrigins = [
-  ...(process.env.ALLOWED_ORIGINS ?? '').split(','),
-  process.env.FRONTEND_URL ?? '',
-].map(o => o.trim().replace(/\/$/, '')).filter(Boolean);
-
-const allowedOrigins = Array.from(new Set([...defaultOrigins, ...configuredOrigins]));
+// CRIT-06: Strict CORS allowlist — no wildcard in production
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? (process.env.ALLOWED_ORIGINS ?? '').split(',').map(o => o.trim()).filter(Boolean)
+  : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'];
 
 app.use(cors({
-  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-    // Allow requests with no origin (e.g., server-to-server or curl)
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g., server-to-server)
     if (!origin) return callback(null, true);
-    
-    const cleanOrigin = origin.trim().replace(/\/$/, '');
-    if (
-      allowedOrigins.includes(cleanOrigin) ||
-      cleanOrigin.endsWith('.onrender.com') ||
-      cleanOrigin.endsWith('.pages.dev') ||
-      cleanOrigin.endsWith('.vercel.app')
-    ) {
-      return callback(null, true);
-    }
-    
-    console.warn(`[CORS Blocked] Origin "${origin}" is not in allowed origins:`, allowedOrigins);
-    callback(null, false);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin "${origin}" is not allowed`));
   },
   credentials: true,
-  optionsSuccessStatus: 200,
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'OPTIONS'],
 }));
 
 // HIGH-05: Global rate limiting
@@ -767,19 +746,53 @@ app.post('/api/v1/payments/verify', writeLimiter, authenticateUserJWT, async (re
       }
     }
 
-    // Credit the wallet in USD via secure server-side RPC
-    const { error: rpcErr } = await userSupabase.rpc('add_funds_secure', {
-      p_user_id: userId,
-      p_amount:  creditAmountUSD,
-    });
-    if (rpcErr) {
-      console.error('[/payments/verify] add_funds_secure failed:', rpcErr);
-      return res.status(500).json({ success: false, message: 'Wallet credit failed.' });
+    // Credit the wallet in USD via secure server-side RPC using service_role client
+    let rpcErr: any = null;
+    try {
+      const res = await supabase.rpc('add_funds_secure', {
+        p_user_id: userId,
+        p_amount:  creditAmountUSD,
+      });
+      rpcErr = res.error;
+    } catch (e: any) {
+      rpcErr = e;
     }
 
-    // Record deposit for audit trail in USD (non-fatal)
+    // Resilient fallback: direct update via service_role if RPC fails
+    if (rpcErr) {
+      console.warn('[/payments/verify] supabase.rpc add_funds_secure failed, applying direct balance credit fallback:', rpcErr);
+      try {
+        const { data: prof, error: fetchErr } = await supabase
+          .from('profiles')
+          .select('wallet_balance')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (!fetchErr && prof) {
+          const newBal = (Number(prof.wallet_balance) || 0) + Number(creditAmountUSD);
+          const { error: updateErr } = await supabase
+            .from('profiles')
+            .update({ wallet_balance: newBal })
+            .eq('id', userId);
+          if (!updateErr) {
+            rpcErr = null; // Successfully credited via fallback
+          } else {
+            console.error('[/payments/verify] Fallback profile balance update failed:', updateErr);
+          }
+        }
+      } catch (fallbackErr) {
+        console.error('[/payments/verify] Direct balance credit error:', fallbackErr);
+      }
+    }
+
+    if (rpcErr) {
+      console.error('[/payments/verify] add_funds_secure and fallback both failed:', rpcErr);
+      return res.status(500).json({ success: false, message: 'Wallet credit failed: ' + (rpcErr.message || 'database error') });
+    }
+
+    // Record deposit for audit trail in USD using service_role (non-fatal)
     try {
-      await userSupabase.from('deposits').insert({
+      await supabase.from('deposits').insert({
         user_id:        userId,
         amount:         creditAmountUSD,
         payment_method: gateway.charAt(0).toUpperCase() + gateway.slice(1),
@@ -791,9 +804,9 @@ app.post('/api/v1/payments/verify', writeLimiter, authenticateUserJWT, async (re
       console.warn('[/payments/verify] Could not insert deposit row:', depErr);
     }
 
-    // Update payment_transactions status + multi-currency fields (non-fatal)
+    // Update payment_transactions status + multi-currency fields using service_role (non-fatal)
     try {
-      await userSupabase
+      await supabase
         .from('payment_transactions')
         .update({
           status:             'paid',

@@ -757,7 +757,15 @@ export default function UserDashboard() {
                           overflow: 'hidden',
                         }}
                       >
-                        <div className="marketplace-card-img" style={{ position: 'absolute', inset: 0, background: `url(${card.banner_image || 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60'}) center/cover`, zIndex: 0 }} />
+                        <div 
+                          className="marketplace-card-img" 
+                          style={{ 
+                            position: 'absolute', 
+                            inset: 0, 
+                            background: `url(${(!card.banner_image || card.banner_image.includes('localhost') || card.banner_image.includes('127.0.0.1')) ? 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60' : card.banner_image}) center/cover`, 
+                            zIndex: 0 
+                          }} 
+                        />
                         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, rgba(25,28,29,0.55), rgba(25,28,29,0.85))', zIndex: 1 }} />
                         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 50%)', pointerEvents: 'none', borderRadius: '24px', zIndex: 2 }} />
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', position: 'relative', zIndex: 3 }}>
