@@ -83,13 +83,13 @@ app.use(cors({
     }
     
     console.warn(`[CORS Blocked] Origin "${origin}" is not in allowed origins:`, allowedOrigins);
-    callback(new Error(`CORS: origin "${origin}" is not allowed`));
+    callback(null, false);
   },
   credentials: true,
+  optionsSuccessStatus: 200,
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
-app.options('*', cors());
 
 // HIGH-05: Global rate limiting
 const globalLimiter = rateLimit({
