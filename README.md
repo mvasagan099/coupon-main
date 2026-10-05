@@ -71,3 +71,8 @@ export default defineConfig([
   },
 ])
 ```
+# Coupon destinations
+
+The site includes two public coupon pages at `/lottery` and `/gaming-hub`, linked from the home page, customer dashboard, and footer. Each page offers sample options and uses the existing Supabase coupon validation and partial balance redemption RPCs.
+
+These are demo redemption experiences: they do not issue real lottery entries or deliver games. Confirming a redemption deducts the selected amount from the coupon. A coupon must cover the full amount; unused balance remains available. The pages require `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, plus the `validate_coupon` and `redeem_coupon_amount` RPCs. Server redemption failures are displayed without the legacy full-balance fallback.

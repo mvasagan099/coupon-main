@@ -51,6 +51,8 @@ export default function Footer() {
           <div>
             <h4 className="text-white font-semibold mb-6 tracking-wide text-sm uppercase">Product</h4>
             <ul className="flex flex-col gap-3">
+              <li><Link to="/lottery" className="text-slate-400 hover:text-white text-sm transition-colors">Lottery</Link></li>
+              <li><Link to="/gaming-hub" className="text-slate-400 hover:text-white text-sm transition-colors">Gaming Hub</Link></li>
               <li><Link to="/" className="text-slate-400 hover:text-[var(--primary-container)] text-sm transition-colors duration-300 inline-flex items-center gap-2 group"><span>Marketplace</span></Link></li>
               <li><a href="#features" className="text-slate-400 hover:text-[var(--primary-container)] text-sm transition-colors duration-300 inline-flex items-center gap-2 group"><span>Features</span></a></li>
               <li><a href="#pricing" className="text-slate-400 hover:text-[var(--primary-container)] text-sm transition-colors duration-300 inline-flex items-center gap-2 group"><span>Pricing</span></a></li>

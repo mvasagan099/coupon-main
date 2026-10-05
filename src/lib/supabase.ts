@@ -779,7 +779,7 @@ export async function validateCouponById(id: string): Promise<CouponValidation> 
   }
 }
 
-export async function redeemCouponAmount(couponId: string, amount: number): Promise<{ remaining_balance: number; status: string }> {
+export async function redeemCouponAmount(couponId: string, amount: number, options: { allowFallback?: boolean } = {}): Promise<{ remaining_balance: number; status: string }> {
   try {
     const { data, error } = await supabase.rpc("redeem_coupon_amount", {
       p_coupon_id: couponId,
@@ -792,6 +792,8 @@ export async function redeemCouponAmount(couponId: string, amount: number): Prom
       status: data[0].status
     };
   } catch (err: any) {
+    // Coupon destinations require a confirmed server redemption before showing success.
+    if (options.allowFallback === false) throw err;
     console.warn("[CouponVault] redeemCouponAmount RPC failed, attempting direct table update:", err.message);
     try {
       const { data: cp, error: updateErr } = await supabase
