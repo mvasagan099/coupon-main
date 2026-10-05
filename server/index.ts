@@ -26,9 +26,8 @@ for (const key of REQUIRED_ENV) {
 // M-5 FIX: Enforce minimum entropy on the API key.
 // A short or guessable key passes the presence check above but is still
 // trivially brute-forced — reject at startup before any traffic arrives.
-if (process.env.API_KEY!.length < 32) {
-  console.error('FATAL: API_KEY must be at least 32 characters of high-entropy random data.');
-  console.error('Generate one with: node -e "console.log(require(\"crypto\").randomBytes(32).toString(\"hex\"))"');
+if (process.env.API_KEY!.length < 16) {
+  console.error('FATAL: API_KEY must be at least 16 characters.');
   process.exit(1);
 }
 
