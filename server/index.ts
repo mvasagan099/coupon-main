@@ -68,7 +68,7 @@ const configuredOrigins = [
 const allowedOrigins = Array.from(new Set([...defaultOrigins, ...configuredOrigins]));
 
 app.use(cors({
-  origin: (origin, callback) => {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
     // Allow requests with no origin (e.g., server-to-server or curl)
     if (!origin) return callback(null, true);
     
