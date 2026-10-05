@@ -141,6 +141,7 @@ export function LoginPage() {
           email,
           password,
           options: {
+            emailRedirectTo: `${window.location.origin}/login`,
             data: {
               role,
               country:            selectedCountry?.name ?? null,

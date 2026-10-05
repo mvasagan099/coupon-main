@@ -497,20 +497,51 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     }
     
     if (error) throw error;
-    const localCards = getLocal<GiftCard[]>("cv_gift_cards", []);
-    const localFiltered = companyId ? localCards.filter(c => c.company_id === companyId) : localCards;
     
     const issuedCounts = getLocal<Record<string, number>>("cv_issued_counts", {});
 
-    return [
-      ...localFiltered.map(c => ({ ...c, issued_count: Math.max(c.issued_count || 0, issuedCounts[c.id] || 0) })),
-      ...(data ?? []).map((d: any) => ({
-        ...d,
-        company_name: d.company_name || d.companies?.name,
-        // Use the global count if available, otherwise fallback to local trackers
-        issued_count: Math.max(d.issued_count || 0, issuedCounts[d.id] || 0)
-      }))
-    ];
+    const remoteCards: GiftCard[] = (data ?? []).map((d: any) => ({
+      ...d,
+      company_name: d.company_name || d.companies?.name,
+      // Use the global count if available, otherwise fallback to local trackers
+      issued_count: Math.max(d.issued_count || 0, issuedCounts[d.id] || 0)
+    }));
+
+    if (remoteCards.length > 0) {
+      // Deduplicate remote cards by ID and by company_id + title
+      const seenIds = new Set<string>();
+      const seenKeys = new Set<string>();
+      const deduped: GiftCard[] = [];
+
+      for (const card of remoteCards) {
+        const titleKey = `${card.company_id || ""}::${(card.title || "").trim().toLowerCase()}`;
+        if (!seenIds.has(card.id) && !seenKeys.has(titleKey)) {
+          seenIds.add(card.id);
+          seenKeys.add(titleKey);
+          deduped.push(card);
+        }
+      }
+      return deduped;
+    }
+
+    // Fallback only if database has no cards
+    const localCards = getLocal<GiftCard[]>("cv_gift_cards", []);
+    const localFiltered = companyId ? localCards.filter(c => c.company_id === companyId) : localCards;
+    const seenLocal = new Set<string>();
+    const dedupedLocal: GiftCard[] = [];
+
+    for (const card of localFiltered) {
+      const titleKey = `${card.company_id || ""}::${(card.title || "").trim().toLowerCase()}`;
+      if (!seenLocal.has(card.id) && !seenLocal.has(titleKey)) {
+        seenLocal.add(card.id);
+        seenLocal.add(titleKey);
+        dedupedLocal.push({
+          ...card,
+          issued_count: Math.max(card.issued_count || 0, issuedCounts[card.id] || 0)
+        });
+      }
+    }
+    return dedupedLocal;
   } catch (err: any) {
     console.warn("[CouponVault] getGiftCards failed, falling back to LocalStorage:", err.message);
     const cards = getLocal<GiftCard[]>("cv_gift_cards", []);
@@ -518,10 +549,22 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     const filtered = companyId ? cards.filter(c => c.company_id === companyId) : cards;
     const issuedCounts = getLocal<Record<string, number>>("cv_issued_counts", {});
     
-    return filtered.map(c => {
-      const co = companies.find(comp => comp.id === c.company_id);
-      return { ...c, company_name: co ? co.name : "Unknown Brand", issued_count: Math.max(c.issued_count || 0, issuedCounts[c.id] || 0) };
-    });
+    const seen = new Set<string>();
+    const deduped: GiftCard[] = [];
+    for (const c of filtered) {
+      const key = `${c.company_id || ""}::${(c.title || "").trim().toLowerCase()}`;
+      if (!seen.has(c.id) && !seen.has(key)) {
+        seen.add(c.id);
+        seen.add(key);
+        const co = companies.find(comp => comp.id === c.company_id);
+        deduped.push({
+          ...c,
+          company_name: co ? co.name : "Unknown Brand",
+          issued_count: Math.max(c.issued_count || 0, issuedCounts[c.id] || 0)
+        });
+      }
+    }
+    return deduped;
   }
 }
 
