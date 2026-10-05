@@ -52,22 +52,44 @@ app.use(helmet({
   },
 }) as express.RequestHandler);
 
-// CRIT-06: Strict CORS allowlist — no wildcard in production
-const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? (process.env.ALLOWED_ORIGINS ?? '').split(',').map(o => o.trim()).filter(Boolean)
-  : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'];
+// CRIT-06: Strict CORS allowlist with support for configured origins & Render deployments
+const defaultOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'https://coupon-frontend-e8b3.onrender.com'
+];
+
+const configuredOrigins = [
+  ...(process.env.ALLOWED_ORIGINS ?? '').split(','),
+  process.env.FRONTEND_URL ?? '',
+].map(o => o.trim().replace(/\/$/, '')).filter(Boolean);
+
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...configuredOrigins]));
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g., server-to-server)
+    // Allow requests with no origin (e.g., server-to-server or curl)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    
+    const cleanOrigin = origin.trim().replace(/\/$/, '');
+    if (
+      allowedOrigins.includes(cleanOrigin) ||
+      cleanOrigin.endsWith('.onrender.com') ||
+      cleanOrigin.endsWith('.pages.dev') ||
+      cleanOrigin.endsWith('.vercel.app')
+    ) {
+      return callback(null, true);
+    }
+    
+    console.warn(`[CORS Blocked] Origin "${origin}" is not in allowed origins:`, allowedOrigins);
     callback(new Error(`CORS: origin "${origin}" is not allowed`));
   },
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
+app.options('*', cors());
 
 // HIGH-05: Global rate limiting
 const globalLimiter = rateLimit({
