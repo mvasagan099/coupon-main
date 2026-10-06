@@ -1320,11 +1320,20 @@ export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
       withTimeout(transfersQuery, 8000).catch(() => ({ data: null, error: null })),
     ]);
 
+    const formatPaymentMethod = (method?: string) => {
+      if (!method) return 'Wallet Top-up';
+      return method
+        .replace(/lottery\s+winnings?\s+transfer/gi, 'Winning Transfer')
+        .replace(/lottery\s+winnings?/gi, 'Winning Transfer')
+        .replace(/\blottery\b/gi, '')
+        .trim() || 'Wallet Top-up';
+    };
+
     const dbDeposits: UserDeposit[] = ((depRes as any)?.data ?? []).map((d: any) => ({
       id: d.id,
       user_id: d.user_id,
       amount: Number(d.amount),
-      payment_method: d.payment_method || 'Wallet Top-up',
+      payment_method: formatPaymentMethod(d.payment_method),
       reference_id: d.reference_id || d.id,
       status: (d.status?.toLowerCase() === 'success' ? 'completed' : d.status?.toLowerCase()) || 'completed',
       created_at: d.created_at,
@@ -1334,7 +1343,7 @@ export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
       id: t.id,
       user_id: t.user_id,
       amount: Number(t.amount),
-      payment_method: 'Lottery Winnings Transfer',
+      payment_method: 'Winning Transfer',
       reference_id: t.transaction_id || t.reference_id || t.id,
       status: (t.status?.toLowerCase() === 'success' ? 'completed' : t.status?.toLowerCase()) || 'completed',
       created_at: t.created_at,
@@ -1345,7 +1354,10 @@ export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
     const existingIds = new Set([...dbDeposits.map(d => d.id), ...dbTransfers.map(t => t.id)]);
     const uniqueLocal = localDeposits.filter(d => !existingIds.has(d.id));
 
-    const allCombined = [...dbDeposits, ...dbTransfers, ...uniqueLocal];
+    const allCombined = [...dbDeposits, ...dbTransfers, ...uniqueLocal].map(d => ({
+      ...d,
+      payment_method: formatPaymentMethod(d.payment_method),
+    }));
     return allCombined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   } catch (err: any) {
     const localDeposits = getLocal<UserDeposit[]>("cv_deposits", []);

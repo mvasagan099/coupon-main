@@ -454,7 +454,7 @@ app.post('/api/v1/wallet/transfer', writeLimiter, authenticateAPIKey, async (req
         await supabase.from('deposits').insert({
           user_id:        userProfile.id,
           amount,
-          payment_method: 'Lottery Winnings Transfer',
+          payment_method: 'Winning Transfer',
           reference_id:   transactionId,
           status:         'completed',
           created_at:     new Date().toISOString(),

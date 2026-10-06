@@ -16,7 +16,6 @@ const MerchantDashboard = lazy(() => import('./pages/MerchantDashboard'));
 const CouponPage = lazy(() => import('./pages/CouponPage'));
 const ScanPage = lazy(() => import('./pages/ScanPage'));
 const DemoStorePage = lazy(() => import('./pages/DemoStorePage'));
-const CouponExperiencePage = lazy(() => import('./pages/CouponExperiencePage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 // Protected Route Wrapper
@@ -77,8 +76,6 @@ function App() {
                 {/* App Layout Framework */}
                 <Route path="/" element={<Layout />}>
                   <Route index element={<LandingPage />} />
-                  <Route path="lottery" element={<CouponExperiencePage key="lottery" experience="lottery" />} />
-                  <Route path="gaming-hub" element={<CouponExperiencePage key="gaming" experience="gaming" />} />
                   <Route path="login" element={<LoginPage />} />
                   <Route path="userlogin" element={<LoginPage />} />
                   <Route path="companylogin" element={<LoginPage />} />

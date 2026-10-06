@@ -53,6 +53,15 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function cleanPaymentMethod(method?: string): string {
+  if (!method) return 'Wallet Top-up';
+  return method
+    .replace(/lottery\s+winnings?\s+transfer/gi, 'Winning Transfer')
+    .replace(/lottery\s+winnings?/gi, 'Winning Transfer')
+    .replace(/\blottery\b/gi, '')
+    .trim() || 'Wallet Top-up';
+}
+
 export default function UserDashboard() {
   const { user, isLoading: authLoading } = useAuth();
   const { success, error: toastError } = useToast();
@@ -584,7 +593,7 @@ export default function UserDashboard() {
     deposits.forEach((deposit) => {
       list.push({
         date: deposit.created_at,
-        brand: deposit.payment_method || 'Wallet Top-up',
+        brand: cleanPaymentMethod(deposit.payment_method),
         type: 'Deposit',
         amount: `+${formatCurrency(deposit.amount * userFxRate, userCurrency)}`,
         status: deposit.status === 'completed' ? 'Completed' : 'Pending',
@@ -1002,7 +1011,7 @@ export default function UserDashboard() {
             </div>
             {deposits.length === 0 ? (
               <p style={{ color: 'var(--text-3)', fontSize: '0.9rem', margin: '0.5rem 0' }}>
-                No deposits yet. Top up your wallet or transfer lottery winnings to see records here.
+                No deposits yet. Top up your wallet or transfer winnings to see records here.
               </p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -1020,7 +1029,7 @@ export default function UserDashboard() {
                     {slicedDeposits.map((d) => (
                       <tr key={d.id}>
                         <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(d.created_at).toLocaleString()}</td>
-                        <td style={{ fontWeight: 600 }}>{d.payment_method || 'Wallet Top-up'}</td>
+                        <td style={{ fontWeight: 600 }}>{cleanPaymentMethod(d.payment_method)}</td>
                         <td className="mono text-muted" style={{ fontSize: '0.8rem' }}>{d.reference_id || d.id.slice(0, 10)}</td>
                         <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>
                           +{formatCurrency(d.amount * userFxRate, userCurrency)}

@@ -42,11 +42,6 @@ const getBrandLogo = (name: string) => {
 export default function LandingPage() {
   return (
     <div className="fade-in" style={{ paddingBottom: '3rem' }}>
-      <section className="home-coupon-destinations" aria-label="Use your coupons">
-        <div><span>USE YOUR COUPONS</span><h2>Choose your next experience</h2></div>
-        <Link to="/lottery"><strong>Lottery</strong><span>Explore lottery coupon demos →</span></Link>
-        <Link to="/gaming-hub"><strong>Gaming Hub</strong><span>Explore gaming coupon demos →</span></Link>
-      </section>
       <section className="hero-section">
         <div className="app-shell hero-shell">
           <div className="hero-copy">

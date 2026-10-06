@@ -1,11 +1,10 @@
 import { useEffect, type ReactNode } from 'react';
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Sun, Moon, ShoppingBag, Wallet, Activity, CreditCard } from 'lucide-react';
 
 import { useTheme } from '../hooks/useTheme';
 import TopNav from './TopNav';
 import Footer from './Footer';
-import '../pages/CouponExperiencePage.css';
 
 interface LayoutProps {
   children?: ReactNode;
@@ -98,7 +97,6 @@ export function Layout({ children }: LayoutProps = {}) {
         </div>
 
         <div className="layout-dashboard-shell relative z-[1]">
-          {currentPortal === 'customer' && <ExperienceNav />}
           <main id="main-content" className="dashboard-content-glass page-fade-in layout-dashboard-content flex-1 p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto w-full" role="main">
             {children ?? <Outlet />}
           </main>
@@ -166,22 +164,10 @@ export function Layout({ children }: LayoutProps = {}) {
         </div>
       </header>
 
-      <ExperienceNav />
-
       <main id="main-content" className="app-shell layout-public-main" role="main">{children ?? <Outlet />}</main>
 
       <Footer />
     </div>
-  );
-}
-
-function ExperienceNav() {
-  return (
-    <nav className="experience-nav app-shell" aria-label="Coupon destinations">
-      <NavLink to="/" end>Home</NavLink>
-      <NavLink to="/lottery">Lottery</NavLink>
-      <NavLink to="/gaming-hub">Gaming Hub</NavLink>
-    </nav>
   );
 }
 
