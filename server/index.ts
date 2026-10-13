@@ -9,6 +9,8 @@ import { RazorpayService } from './services/RazorpayService';
 import { StripeService } from './services/StripeService';
 import { PayPalService } from './services/PayPalService';
 import type { PaymentGateway } from './services/PaymentService';
+import { userAuthentication } from './security';
+import { findPayment, settlePayment } from './paymentSettlement';
 import { countryService } from './services/CountryService';
 import { exchangeRateService } from './services/ExchangeRateService';
 
@@ -28,7 +30,6 @@ for (const key of REQUIRED_ENV) {
 // trivially brute-forced — reject at startup before any traffic arrives.
 if (process.env.API_KEY!.length < 32) {
   console.error('FATAL: API_KEY must be at least 32 characters of high-entropy random data.');
-  console.error('Generate one with: node -e "console.log(require(\"crypto\").randomBytes(32).toString(\"hex\"))"');
   process.exit(1);
 }
 
@@ -90,7 +91,7 @@ const writeLimiter = rateLimit({
 app.use(globalLimiter);
 
 // Raw body parser for Stripe webhook signature verification (must come BEFORE json())
-app.use('/api/v1/payments/webhook/stripe', express.raw({ type: 'application/json' }));
+app.use(['/api/v1/payments/webhook/stripe', '/api/v1/payments/webhook/razorpay', '/api/v1/payments/webhook/paypal'], express.raw({ type: 'application/json', limit: '64kb' }));
 
 app.use(express.json({ limit: '64kb' }));
 
@@ -131,60 +132,7 @@ const authenticateAPIKey = (
 // authenticateAPIKey is applied per-route (not globally) so that the JWT-auth
 // payment endpoints are not blocked by the server-to-server API key check.
 
-// ── Supabase JWT auth (for browser-originated payment requests) ──────────────
-// Supabase JWTs are HS256-signed with the project JWT secret. For server-side
-// verification without a network round-trip we decode the payload and check:
-//   1. The token is not expired (exp claim).
-//   2. The issuer matches our Supabase project URL.
-//   3. A sub (user ID) is present.
-// This is safe because CORS restricts callers to our own origin, and the token
-// is signed by Supabase — a tampered payload would fail signature verification
-// on any downstream Supabase operation that uses the token.
-const authenticateUserJWT = (
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction,
-) => {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'Missing user auth token.' });
-  }
-  const token = authHeader.slice(7);
-
-  try {
-    // Decode (not verify signature — see note above) the JWT payload
-    const parts = token.split('.');
-    if (parts.length !== 3) throw new Error('Malformed token');
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
-      sub?: string;
-      exp?: number;
-      iss?: string;
-    };
-
-    // Reject expired tokens
-    if (!payload.exp || Date.now() / 1000 > payload.exp) {
-      return res.status(401).json({ success: false, message: 'Session expired. Please sign in again.' });
-    }
-
-    // Require a user subject (anon sessions have sub = UUID of the anon user)
-    if (!payload.sub) {
-      return res.status(401).json({ success: false, message: 'Invalid user session.' });
-    }
-
-    (req as any).jwtUserId = payload.sub;
-    (req as any).userToken = token;
-    next();
-  } catch {
-    return res.status(401).json({ success: false, message: 'Invalid or malformed auth token.' });
-  }
-};
-
-function getUserSupabaseClient(token: string) {
-  return createClient(SUPABASE_URL, process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_KEY!, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-}
-
+const authenticateUserJWT = userAuthentication(supabase);
 
 // ── Payment gateway singletons (lazy-initialised) ────────────────────────────
 // Each service is only constructed when its env vars are present, so the server
@@ -369,7 +317,7 @@ app.post('/api/v1/coupons/redeem', writeLimiter, authenticateAPIKey, async (req,
       }
     }
 
-    const { data, error } = await supabase.rpc('redeem_game_coupon', {
+    const { error } = await supabase.rpc('redeem_game_coupon', {
       p_coupon_id:           couponId,
       p_game_user_id:        userId,
       p_game_id:             gameId,
@@ -474,49 +422,9 @@ app.post('/api/v1/wallet/transfer', writeLimiter, authenticateAPIKey, async (req
 
 // POST /api/v1/wallet/deposit
 // Secure server-to-server endpoint to credit user wallet via add_funds_secure (service_role)
-app.post('/api/v1/wallet/deposit', writeLimiter, authenticateAPIKey, async (req, res) => {
-  try {
-    const { userId, amount, referenceId, paymentMethod } = req.body;
-
-    if (!isNonEmptyString(userId) || !isNonEmptyString(referenceId)) {
-      return res.status(400).json({ success: false, message: 'Missing required parameters (userId, referenceId).' });
-    }
-
-    if (!isSafePositiveNumber(amount, 100_000)) {
-      return res.status(400).json({ success: false, message: 'Invalid or out-of-range deposit amount.' });
-    }
-
-    const { data: newBalance, error } = await supabase.rpc('add_funds_secure', {
-      p_user_id: userId,
-      p_amount:  amount,
-    });
-
-    if (error) {
-      console.error('[/wallet/deposit]', error);
-      return res.status(400).json({ success: false, message: error.message });
-    }
-
-    // Record deposit for audit
-    try {
-      await supabase.from('deposits').insert({
-        user_id:        userId,
-        amount,
-        payment_method: isNonEmptyString(paymentMethod) ? paymentMethod : 'API Deposit',
-        reference_id:   referenceId,
-        status:         'completed',
-        created_at:     new Date().toISOString(),
-      });
-    } catch (depErr) {
-      console.warn('[/wallet/deposit] Could not record deposit row:', depErr);
-    }
-
-    return res.json({ success: true, message: 'Deposit successful', newBalance });
-  } catch (err) {
-    console.error('[/wallet/deposit]', err);
-    return res.status(500).json({ success: false, message: 'Internal server error' });
-  }
+app.post('/api/v1/wallet/deposit', (_req, res) => {
+  res.status(410).json({ success: false, message: 'Use authenticated payment verification to fund a wallet.' });
 });
-
 
 // GET /api/v1/coupons/:id
 app.get('/api/v1/coupons/:id', authenticateAPIKey, async (req, res) => {
@@ -627,7 +535,7 @@ app.get('/api/v1/payments/gateways', (req, res) => {
 app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (req, res) => {
   try {
     const { gateway, amount, currency } = req.body;
-    const userId = (req as any).jwtUserId as string; // from verified JWT
+    const userId = res.locals.userId as string; // from verified JWT
 
     const validGateways: PaymentGateway[] = ['razorpay', 'stripe', 'paypal'];
     if (!validGateways.includes(gateway)) {
@@ -638,43 +546,27 @@ app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (re
     }
 
     const receiptId = `cv_${userId.slice(0, 8)}_${Date.now()}_${randomUUID().slice(0, 8)}`;
-    const effectiveCurrency = (currency ?? (gateway === 'razorpay' ? 'INR' : 'USD')).toUpperCase();
+    const currencyInput = currency ?? (gateway === 'razorpay' ? 'INR' : 'USD');
+    if (typeof currencyInput !== 'string') return res.status(400).json({ success: false, message: 'Invalid currency.' });
+    const effectiveCurrency = currencyInput.toUpperCase();
+    if (amount !== Math.round(amount * 100) / 100) return res.status(400).json({ success: false, message: 'Use at most two decimal places.' });
 
-    // Compute exchange rate for multi-currency tracking
-    let exchangeRate = 1;
-    let amountUSD = amount;
-    try {
-      if (effectiveCurrency !== 'USD') {
-        const converted = await exchangeRateService.convertToUSD(amount, effectiveCurrency);
-        exchangeRate = converted.rate;
-        amountUSD    = converted.amountUSD;
-      }
-    } catch (fxErr) {
-      console.warn('[/payments/create] Exchange rate lookup failed, defaulting to 1:', fxErr);
+    if (typeof effectiveCurrency !== 'string' || !/^[A-Z]{3}$/.test(effectiveCurrency)) {
+      return res.status(400).json({ success: false, message: 'Invalid currency.' });
     }
+    const converted = await exchangeRateService.convertToUSD(amount, effectiveCurrency);
+    const exchangeRate = converted.rate;
+    const amountUSD = converted.amountUSD;
 
     const service = getGatewayService(gateway);
     const result = await service.createPayment(amount, effectiveCurrency, receiptId);
 
-    // Log pending transaction in Supabase
-    try {
-      const userSupabase = getUserSupabaseClient((req as any).userToken);
-      await userSupabase.from('payment_transactions').insert({
-        user_id:          userId,
-        gateway,
-        gateway_order_id: result.gatewayOrderId,
-        amount_major:     amount,
-        currency:         effectiveCurrency,
-        status:           'pending',
-        idempotency_key:  receiptId,
-        exchange_rate:    exchangeRate,
-        amount_usd:       amountUSD,
-        amount_local:     amount,
-      });
-    } catch (dbErr) {
-      // Non-fatal: payment_transactions table may not exist yet
-      console.warn('[/payments/create] Could not log transaction:', dbErr);
-    }
+    const { error: orderError } = await supabase.from('payment_transactions').insert({
+      user_id: userId, gateway, gateway_order_id: result.gatewayOrderId,
+      amount_major: amount, currency: effectiveCurrency, status: 'pending',
+      idempotency_key: receiptId, exchange_rate: exchangeRate, amount_usd: amountUSD, amount_local: amount,
+    });
+    if (orderError) throw new Error('Could not save the payment order. No payment has been charged.');
 
     return res.json({
       success: true,
@@ -702,24 +594,13 @@ app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (re
 app.post('/api/v1/payments/verify', writeLimiter, authenticateUserJWT, async (req, res) => {
   try {
     const { gateway, gatewayOrderId, gatewayPaymentId, signature } = req.body;
-    const userId = (req as any).jwtUserId as string; // from verified JWT — cannot be spoofed
+    const userId = res.locals.userId as string; // from verified JWT — cannot be spoofed
 
     if (!isNonEmptyString(gateway) || !isNonEmptyString(gatewayOrderId)) {
       return res.status(400).json({ success: false, message: 'gateway and gatewayOrderId are required.' });
     }
 
-    // Prevent replay: check if this order was already verified
-    const userSupabase = getUserSupabaseClient((req as any).userToken);
-    const { data: existing } = await userSupabase
-      .from('payment_transactions')
-      .select('id, status')
-      .eq('gateway_order_id', gatewayOrderId)
-      .eq('status', 'paid')
-      .maybeSingle();
-
-    if (existing) {
-      return res.status(409).json({ success: false, code: 'ALREADY_VERIFIED', message: 'Payment already processed.' });
-    }
+    await findPayment(supabase, gateway as PaymentGateway, gatewayOrderId, userId);
 
     const service = getGatewayService(gateway as PaymentGateway);
     const verifyResult = await service.verifyPayment({
@@ -733,102 +614,13 @@ app.post('/api/v1/payments/verify', writeLimiter, authenticateUserJWT, async (re
       return res.status(400).json({ success: false, message: 'Payment verification failed.' });
     }
 
-    // Convert charged amount to USD if necessary (wallet balance is USD-denominated)
-    let creditAmountUSD = verifyResult.amount;
-    let exchangeRate    = 1;
-    if (verifyResult.currency.toUpperCase() !== 'USD') {
-      try {
-        const conv = await exchangeRateService.convertToUSD(verifyResult.amount, verifyResult.currency);
-        creditAmountUSD = conv.amountUSD;
-        exchangeRate    = conv.rate;
-      } catch (convErr) {
-        console.warn('[/payments/verify] Currency conversion failed, using direct amount:', convErr);
-      }
-    }
-
-    // Credit the wallet in USD via secure server-side RPC using service_role client
-    let rpcErr: any = null;
-    try {
-      const res = await supabase.rpc('add_funds_secure', {
-        p_user_id: userId,
-        p_amount:  creditAmountUSD,
-      });
-      rpcErr = res.error;
-    } catch (e: any) {
-      rpcErr = e;
-    }
-
-    // Resilient fallback: direct update via service_role if RPC fails
-    if (rpcErr) {
-      console.warn('[/payments/verify] supabase.rpc add_funds_secure failed, applying direct balance credit fallback:', rpcErr);
-      try {
-        const { data: prof, error: fetchErr } = await supabase
-          .from('profiles')
-          .select('wallet_balance')
-          .eq('id', userId)
-          .maybeSingle();
-
-        if (!fetchErr && prof) {
-          const newBal = (Number(prof.wallet_balance) || 0) + Number(creditAmountUSD);
-          const { error: updateErr } = await supabase
-            .from('profiles')
-            .update({ wallet_balance: newBal })
-            .eq('id', userId);
-          if (!updateErr) {
-            rpcErr = null; // Successfully credited via fallback
-          } else {
-            console.error('[/payments/verify] Fallback profile balance update failed:', updateErr);
-          }
-        }
-      } catch (fallbackErr) {
-        console.error('[/payments/verify] Direct balance credit error:', fallbackErr);
-      }
-    }
-
-    if (rpcErr) {
-      console.error('[/payments/verify] add_funds_secure and fallback both failed:', rpcErr);
-      return res.status(500).json({ success: false, message: 'Wallet credit failed: ' + (rpcErr.message || 'database error') });
-    }
-
-    // Record deposit for audit trail in USD using service_role (non-fatal)
-    try {
-      await supabase.from('deposits').insert({
-        user_id:        userId,
-        amount:         creditAmountUSD,
-        payment_method: gateway.charAt(0).toUpperCase() + gateway.slice(1),
-        reference_id:   verifyResult.gatewayPaymentId,
-        status:         'completed',
-        created_at:     new Date().toISOString(),
-      });
-    } catch (depErr) {
-      console.warn('[/payments/verify] Could not insert deposit row:', depErr);
-    }
-
-    // Update payment_transactions status + multi-currency fields using service_role (non-fatal)
-    try {
-      await supabase
-        .from('payment_transactions')
-        .update({
-          status:             'paid',
-          gateway_payment_id: verifyResult.gatewayPaymentId,
-          updated_at:         new Date().toISOString(),
-          exchange_rate:      exchangeRate,
-          amount_usd:         creditAmountUSD,
-          amount_local:       verifyResult.amount,
-        })
-        .eq('gateway_order_id', gatewayOrderId);
-    } catch (txErr) {
-      console.warn('[/payments/verify] Could not update transaction status:', txErr);
-    }
+    const settlement = await settlePayment(supabase, gateway as PaymentGateway, gatewayOrderId, userId, verifyResult);
 
     return res.json({
       success: true,
       verified: true,
       gateway,
-      amount: creditAmountUSD,
-      amountLocal: verifyResult.amount,
-      currency: verifyResult.currency,
-      exchangeRate,
+      ...settlement,
     });
   } catch (err: any) {
     console.error('[/payments/verify]', err);
@@ -840,7 +632,7 @@ app.post('/api/v1/payments/verify', writeLimiter, authenticateUserJWT, async (re
  * GET /api/v1/payments/:id/status
  * Returns the current status of a payment order.
  */
-app.get('/api/v1/payments/:id/status', async (req, res) => {
+app.get('/api/v1/payments/:id/status', authenticateUserJWT, async (req, res) => {
   try {
     const { id } = req.params;
     const gateway = req.query.gateway as PaymentGateway;
@@ -850,6 +642,7 @@ app.get('/api/v1/payments/:id/status', async (req, res) => {
     }
 
     const service = getGatewayService(gateway);
+    await findPayment(supabase, gateway, id, res.locals.userId);
     const status = await service.getPaymentStatus(id);
     return res.json({ success: true, status });
   } catch (err: any) {
@@ -870,14 +663,9 @@ app.post('/api/v1/payments/webhook/stripe', async (req, res) => {
 
     if (event.type === 'payment_intent.succeeded') {
       const intent = event.data.object as any;
-      const userId = intent.metadata?.user_id;
-      if (userId) {
-        try {
-          await supabase.rpc('add_funds_secure', { p_user_id: userId, p_amount: intent.amount_received / 100 });
-        } catch (rpcErr) {
-          console.error('[/webhook/stripe] add_funds_secure failed:', rpcErr);
-        }
-      }
+      const stored = await findPayment(supabase, 'stripe', intent.id);
+      const payment = await stripeService.verifyPayment({ gateway: 'stripe', gatewayOrderId: intent.id, gatewayPaymentId: intent.id });
+      await settlePayment(supabase, 'stripe', intent.id, stored.user_id, payment);
     }
 
     return res.json({ received: true });
@@ -894,19 +682,24 @@ app.post('/api/v1/payments/webhook/stripe', async (req, res) => {
 app.post('/api/v1/payments/webhook/razorpay', async (req, res) => {
   try {
     const { createHmac } = await import('crypto');
-    const body = JSON.stringify(req.body);
+    const body = req.body as Buffer;
     const sig  = req.headers['x-razorpay-signature'] as string;
-    const expectedSig = createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!).update(body).digest('hex');
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) throw new Error('Razorpay webhook is not configured.');
+    const expectedSig = createHmac('sha256', secret).update(body).digest('hex');
 
-    if (sig !== expectedSig) {
+    if (typeof sig !== 'string' || sig.length !== expectedSig.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
       return res.status(400).json({ success: false, message: 'Invalid Razorpay signature.' });
     }
 
-    const event = req.body;
+    const event = JSON.parse(body.toString('utf8'));
     if (event.event === 'payment.captured') {
       const payment = event.payload?.payment?.entity;
-      // payment.notes or order metadata would contain userId in production
-      console.log('[/webhook/razorpay] payment.captured', payment?.id);
+      if (!payment || payment.status !== 'captured') throw new Error('Invalid captured payment.');
+      const stored = await findPayment(supabase, 'razorpay', payment.order_id);
+      await settlePayment(supabase, 'razorpay', payment.order_id, stored.user_id, {
+        verified: true, amount: Number(payment.amount) / 100, currency: payment.currency, gatewayPaymentId: payment.id,
+      });
     }
 
     return res.json({ received: true });
@@ -923,7 +716,7 @@ app.post('/api/v1/payments/webhook/razorpay', async (req, res) => {
 app.post('/api/v1/payments/webhook/paypal', async (req, res) => {
   try {
     if (!paypalService) paypalService = new PayPalService();
-    const rawBody = JSON.stringify(req.body);
+    const rawBody = (req.body as Buffer).toString('utf8');
     const headers: Record<string, string | undefined> = {
       'paypal-auth-algo':        req.headers['paypal-auth-algo'] as string,
       'paypal-cert-url':         req.headers['paypal-cert-url'] as string,
@@ -937,9 +730,14 @@ app.post('/api/v1/payments/webhook/paypal', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid PayPal webhook signature.' });
     }
 
-    const eventType = req.body?.event_type;
+    const event = JSON.parse(rawBody);
+    const eventType = event.event_type;
     if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
-      console.log('[/webhook/paypal] Capture completed:', req.body?.resource?.id);
+      const orderId = event.resource?.supplementary_data?.related_ids?.order_id;
+      if (!orderId) throw new Error('Missing PayPal order reference.');
+      const stored = await findPayment(supabase, 'paypal', orderId);
+      const payment = await paypalService.verifyPayment({ gateway: 'paypal', gatewayOrderId: orderId, gatewayPaymentId: event.resource.id });
+      await settlePayment(supabase, 'paypal', orderId, stored.user_id, payment);
     }
 
     return res.json({ received: true });
@@ -959,6 +757,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+const refreshRates = () => { void exchangeRateService.forceRefresh().catch(() => console.warn('Current exchange rates unavailable; currency conversion will fail closed.')); };
+refreshRates();
+setInterval(refreshRates, 60 * 60 * 1000).unref();
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
 app.listen(PORT, () => {
   console.log(`Coupon API Server running on port ${PORT} [${process.env.NODE_ENV ?? 'development'}]`);

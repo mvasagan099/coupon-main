@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase, isSupabaseConfigured, updateUserProfile } from '../lib/supabase';
 import { Eye, EyeOff } from 'lucide-react';
@@ -7,16 +7,19 @@ import CountrySelector from '../components/CountrySelector';
 import type { CountryInfo } from '../lib/countries';
 
 export function LoginPage() {
-  const { user } = useAuth();
+  const { user, authError } = useAuth();
   const navigate = useNavigate();
-  const path = window.location.pathname;
+  const location = useLocation();
+  const path = location.pathname;
+  const requestedPath = (location.state as { from?: string } | null)?.from;
+  const returnPath = requestedPath?.startsWith('/') && !requestedPath.startsWith('//') && !requestedPath.startsWith('/login') ? requestedPath : null;
   const isCompanyRoute = path.includes('companylogin');
   const isAdminRoute = path.includes('adminlogin');
-  const isUserRoute = path.includes('userlogin');
+  const isUserRoute = !isCompanyRoute && !isAdminRoute;
 
   const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState(isAdminRoute ? 'admin@123.com' : '');
-  const [password, setPassword] = useState(isAdminRoute ? 'admin@123' : '');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'info'; text: string } | null>(null);
@@ -115,6 +118,7 @@ export function LoginPage() {
   }
 
   if (user) {
+    if (returnPath) return <Navigate to={returnPath} replace />;
     if (isAdminRoute) return <Navigate to="/admin/overview" replace />;
     if (isCompanyRoute) return <Navigate to="/merchant/overview" replace />;
     return <Navigate to="/dashboard/marketplace" replace />;
@@ -181,20 +185,8 @@ export function LoginPage() {
 
         setMessage({ type: 'info', text: 'Account created! Check your email to confirm.' });
       } else {
-        let { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         
-        // Auto-provision the default admin account on the live server if it doesn't exist yet
-        if (error && email === 'admin@123.com' && isAdminRoute) {
-          const { error: signUpError } = await supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { role: 'admin' } },
-          });
-          if (!signUpError) {
-            const retry = await supabase.auth.signInWithPassword({ email, password });
-            error = retry.error;
-          }
-        }
 
         if (error) {
           if (error.message.toLowerCase().includes('email not confirmed')) {
@@ -203,7 +195,7 @@ export function LoginPage() {
           throw error;
         }
         
-        navigate(isAdminRoute ? '/admin/overview' : isCompanyRoute ? '/merchant/overview' : '/dashboard/marketplace');
+        navigate(returnPath ?? (isAdminRoute ? '/admin/overview' : isCompanyRoute ? '/merchant/overview' : '/dashboard/marketplace'), { replace: true });
       }
     } catch (err: unknown) {
       setMessage({ type: 'error', text: err instanceof Error ? err.message : 'Authentication failed.' });
@@ -309,6 +301,7 @@ export function LoginPage() {
             </div>
           )}
 
+          {authError && <p role="alert">{authError}</p>}
           <form onSubmit={handleAuth} className="auth-form">
             <div>
               <label htmlFor="email" className="label">Email</label>
@@ -340,6 +333,8 @@ export function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
                   style={{
                     position: 'absolute',
                     right: '12px',

@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import { HelmetProvider, Helmet } from 'react-helmet-async';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -28,14 +28,15 @@ function ProtectedRoute({
   adminOnly?: boolean;
   merchantOnly?: boolean;
 }) {
-  const { user, isAdmin, isLoading } = useAuth();
+  const { user, isAdmin, isMerchant, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return <LoadingPage message="Loading session..." />;
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />;
   }
 
   // CRIT-03: Use isAdmin from AuthContext (reads app_metadata, not user-writable user_metadata)
@@ -45,8 +46,8 @@ function ProtectedRoute({
 
   // MED-02: Basic merchant guard — full enforcement is in Supabase RLS policies
   // A user without a company record will see an empty merchant dashboard.
-  if (merchantOnly && !user) {
-    return <Navigate to="/dashboard" replace />;
+  if (merchantOnly && !isMerchant && !isAdmin && location.pathname !== "/merchant/onboarding") {
+    return <Navigate to="/merchant/onboarding" replace />;
   }
 
   return <>{children}</>;

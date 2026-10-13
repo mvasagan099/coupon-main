@@ -61,7 +61,7 @@ async function serverPost<T>(path: string, body: object): Promise<T> {
       },
       body: JSON.stringify(body),
     });
-  } catch (networkErr) {
+  } catch {
     throw new Error(
       'Cannot reach the payment server. Make sure the server is running on port 4000.',
     );

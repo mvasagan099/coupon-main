@@ -1,6 +1,6 @@
 // server/services/RazorpayService.ts
 import Razorpay from 'razorpay';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import type {
   PaymentServiceI,
   CreatePaymentResult,
@@ -66,7 +66,7 @@ export class RazorpayService implements PaymentServiceI {
     const expectedBuf = Buffer.from(expectedSignature, 'hex');
     const signaturesMatch =
       sigBuf.length === expectedBuf.length &&
-      sigBuf.every((byte, i) => byte === expectedBuf[i]);
+      timingSafeEqual(sigBuf, expectedBuf);
 
     if (!signaturesMatch) {
       throw new Error('Razorpay signature verification failed — possible tampering detected.');
@@ -75,6 +75,7 @@ export class RazorpayService implements PaymentServiceI {
     // Fetch payment details to get the captured amount
     const payment = await this.client.payments.fetch(gatewayPaymentId);
 
+    if (payment.order_id !== gatewayOrderId) throw new Error('Payment belongs to a different order.');
     if (payment.status !== 'captured') {
       throw new Error(`Razorpay payment ${gatewayPaymentId} is not captured (status: ${payment.status}).`);
     }

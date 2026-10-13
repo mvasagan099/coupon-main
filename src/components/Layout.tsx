@@ -22,17 +22,19 @@ export function Layout({ children }: LayoutProps = {}) {
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
-  }, [location.pathname]);
+    if (!location.hash) { window.scrollTo({ top: 0, behavior: 'instant' }); return; }
+    const target = document.getElementById(location.hash.slice(1));
+    if (target) target.scrollIntoView();
+  }, [location.pathname, location.hash]);
 
   const isDashboard =
     location.pathname.startsWith('/dashboard') ||
     location.pathname.startsWith('/merchant') ||
-    location.pathname.startsWith('/admin') ||
+    location.pathname.startsWith('/admin/') ||
     location.pathname.startsWith('/my-coupon');
 
   const currentPortal =
-    location.pathname.startsWith('/admin')
+    location.pathname.startsWith('/admin/')
       ? 'admin'
       : location.pathname.startsWith('/merchant')
         ? 'merchant'

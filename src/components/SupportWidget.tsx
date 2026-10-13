@@ -52,6 +52,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const isDraggingRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
   const hasDraggedRef = useRef(false);
   const dragStartRef = useRef<{ clientX: number; clientY: number; initialX: number; initialY: number }>({ clientX: 0, clientY: 0, initialX: 0, initialY: 0 });
 
@@ -77,6 +78,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
       initialY: rect.top,
     };
     isDraggingRef.current = true;
+    setIsDragging(true);
     hasDraggedRef.current = false;
   };
 
@@ -101,6 +103,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
 
   const endDrag = () => {
     isDraggingRef.current = false;
+    setIsDragging(false);
   };
 
   useEffect(() => {
@@ -268,11 +271,11 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
             ? '0 0 0 4px rgba(99,102,241,0.3), 0 8px 32px rgba(99,102,241,0.5)'
             : '0 4px 24px rgba(99,102,241,0.45)',
           border: 'none',
-          cursor: isDraggingRef.current ? 'grabbing' : 'grab',
+          cursor: isDragging ? 'grabbing' : 'grab',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: isDraggingRef.current ? 'none' : 'box-shadow 0.25s, transform 0.2s',
+          transition: isDragging ? 'none' : 'box-shadow 0.25s, transform 0.2s',
           transform: open ? 'scale(1.08) rotate(15deg)' : 'scale(1)',
           userSelect: 'none',
           touchAction: 'none',

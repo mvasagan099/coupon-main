@@ -1,212 +1,32 @@
-// @ts-nocheck
-// HIGH-03: Use shared CORS module — no wildcard origins
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json",
-    },
-  });
-}
-
-async function getPayPalAccessToken(clientId: string, secret: string, baseUrl: string): Promise<string> {
-  const credentials = btoa(`${clientId}:${secret}`);
-  const response = await fetch(`${baseUrl}/v1/oauth2/token`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`PayPal Auth failed: ${errorText}`);
-  }
-
-  const data = await response.json();
-  return data.access_token;
-}
-
-serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { status: 200, headers: corsHeaders });
-  }
-
-  if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
-  }
-
-  // Verify JWT caller
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  if (!jwt) {
-    return jsonResponse({ error: "Authentication required" }, 401);
-  }
-
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY") ?? supabaseAnonKey;
-
-  const supabaseUserClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
-  });
-
-  const { data: { user }, error: authError } = await supabaseUserClient.auth.getUser();
-  if (authError || !user) {
-    return jsonResponse({ error: "Invalid or expired session" }, 401);
-  }
-
+import { clients, failure, json, paypal } from '../_shared/payment.ts';
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return json(req, {});
+  if (req.method !== 'POST') return json(req, { error: 'Method not allowed.' }, 405);
   try {
-    const paypalClientId = Deno.env.get("PAYPAL_CLIENT_ID") ?? "";
-    const paypalSecret = Deno.env.get("PAYPAL_SECRET") ?? "";
-    const paypalMode = Deno.env.get("PAYPAL_MODE") ?? "sandbox";
-
-    if (!paypalClientId || !paypalSecret) {
-      return jsonResponse(
-        {
-          error:
-            "Missing PayPal server credentials. Set PAYPAL_CLIENT_ID and PAYPAL_SECRET in Supabase Edge Function secrets.",
-        },
-        500,
-      );
+    const { user, admin } = await clients(req);
+    const { order_id: orderId } = await req.json();
+    if (typeof orderId !== 'string' || !/^[A-Z0-9]{5,64}$/.test(orderId)) throw new Error('Invalid order ID.');
+    const { data: stored, error } = await admin.from('payment_transactions').select('*')
+      .eq('gateway', 'paypal').eq('gateway_order_id', orderId).eq('user_id', user.id).maybeSingle();
+    if (error) throw new Error('Payment records are unavailable. Retry verification.');
+    if (!stored) throw new Error('Order does not belong to this account.');
+    if (stored.status === 'paid') return json(req, { verified: true, amount: Number(stored.amount_usd), alreadyCredited: true });
+    let order = await paypal(`/v2/checkout/orders/${encodeURIComponent(orderId)}`);
+    const unit = order.purchase_units?.[0];
+    if (order.purchase_units?.length !== 1 || Number(unit?.amount?.value) !== Number(stored.amount_major) ||
+      unit?.amount?.currency_code !== stored.currency || unit?.custom_id !== user.id) throw new Error('Order details do not match the stored payment.');
+    if (order.status === 'APPROVED') {
+      order = await paypal(`/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, 'POST', {}, stored.idempotency_key);
     }
-
-    const paypalBaseUrl = paypalMode === "live"
-      ? "https://api-m.paypal.com"
-      : "https://api-m.sandbox.paypal.com";
-
-    let body: Record<string, unknown>;
-    try {
-      body = await req.json();
-    } catch {
-      return jsonResponse({ error: "Request body must be valid JSON." }, 400);
-    }
-
-    const { order_id } = body as {
-      order_id?: unknown;
-    };
-
-    if (typeof order_id !== "string" || !order_id) {
-      return jsonResponse({ error: "order_id is required." }, 400);
-    }
-
-    // Get the Access Token
-    let accessToken: string;
-    try {
-      accessToken = await getPayPalAccessToken(paypalClientId, paypalSecret, paypalBaseUrl);
-    } catch (err: any) {
-      return jsonResponse({ error: err.message || "Failed to authenticate with PayPal." }, 500);
-    }
-
-    // Capture the Order on PayPal
-    const response = await fetch(`${paypalBaseUrl}/v2/checkout/orders/${order_id}/capture`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
+    if (order.status !== 'COMPLETED') throw new Error('Payment has not been captured.');
+    const captures = order.purchase_units?.[0]?.payments?.captures;
+    const capture = captures?.[0];
+    if (captures?.length !== 1 || capture?.status !== 'COMPLETED' || Number(capture.amount?.value) !== Number(stored.amount_major) ||
+      capture.amount?.currency_code !== stored.currency || !capture.id) throw new Error('Captured payment does not match the order.');
+    const { data: settlement, error: creditError } = await admin.rpc('settle_verified_payment', {
+      p_transaction_id: stored.id, p_capture_id: capture.id, p_amount: Number(capture.amount.value), p_currency: capture.amount.currency_code,
     });
-
-    const payload = await response.json();
-
-    if (!response.ok) {
-      return jsonResponse(
-        {
-          verified: false,
-          error: payload?.message || "Failed to capture PayPal order.",
-          details: payload,
-        },
-        response.status,
-      );
-    }
-
-    const isCompleted = payload.status === "COMPLETED";
-
-    if (isCompleted) {
-      // Extract authoritative captured amount from PayPal response
-      const captureObj = payload.purchase_units?.[0]?.payments?.captures?.[0];
-      const rawAmount = captureObj?.amount?.value || payload.purchase_units?.[0]?.amount?.value || "0";
-      const capturedAmount = parseFloat(rawAmount);
-
-      if (capturedAmount > 0) {
-        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-        
-        // Securely credit wallet via add_funds_secure (service_role only)
-        const { error: creditError } = await supabaseAdmin.rpc("add_funds_secure", {
-          p_user_id: user.id,
-          p_amount: capturedAmount,
-        });
-
-        if (creditError) {
-          console.error("Failed to credit wallet via add_funds_secure:", creditError);
-          // Fallback: direct profiles wallet_balance update if RPC failed
-          const { data: profileData } = await supabaseAdmin
-            .from("profiles")
-            .select("wallet_balance")
-            .eq("id", user.id)
-            .maybeSingle();
-
-          const currentBal = profileData?.wallet_balance ?? 0;
-          const { error: updateError } = await supabaseAdmin
-            .from("profiles")
-            .update({ wallet_balance: currentBal + capturedAmount })
-            .eq("id", user.id);
-
-          if (updateError) {
-            console.error("Direct wallet_balance update fallback also failed:", updateError);
-            return jsonResponse(
-              {
-                verified: false,
-                error: `Payment captured, but failed to credit wallet: ${updateError.message}`,
-              },
-              500,
-            );
-          }
-        }
-
-        // Record deposit audit entry (swallow missing deposits table error if unmigrated)
-        try {
-          await supabaseAdmin.from("deposits").insert({
-            user_id: user.id,
-            amount: capturedAmount,
-            payment_method: "PayPal",
-            reference_id: order_id,
-            status: "completed",
-            created_at: new Date().toISOString(),
-          });
-        } catch (depErr) {
-          console.warn("Could not record deposit row (deposits table missing):", depErr);
-        }
-      }
-
-      return jsonResponse(
-        {
-          verified: true,
-          amount: capturedAmount,
-          status: payload.status,
-          details: payload,
-        },
-        200,
-      );
-    }
-
-    return jsonResponse(
-      {
-        verified: false,
-        status: payload.status,
-        details: payload,
-      },
-      200,
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return jsonResponse({ verified: false, error: message }, 500);
-  }
+    if (creditError || !settlement) throw new Error('Payment received; wallet credit is pending. Retry verification with the same order.');
+    return json(req, { verified: true, amount: Number(stored.amount_usd), ...settlement });
+  } catch (error) { return failure(req, error); }
 });

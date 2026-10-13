@@ -29,16 +29,14 @@ class TimeoutError extends Error {
 }
 const hasTimedOut = false;
 
-function withTimeout<T>(promise: PromiseLike<T>, ms = 15000): Promise<T> {
-  if (!isSupabaseConfigured) {
-    return Promise.reject(new Error("Supabase is not configured, failing fast."));
-  }
-  return Promise.race([
-    Promise.resolve(promise),
-    new Promise<T>((_, reject) => setTimeout(() => {
-      reject(new TimeoutError(ms));
-    }, ms)),
-  ]);
+async function withTimeout<T>(promise: PromiseLike<T>, ms = 15000): Promise<T> {
+  if (!isSupabaseConfigured) throw new Error("Supabase is not configured, failing fast.");
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    return await Promise.race([Promise.resolve(promise), new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new TimeoutError(ms)), ms);
+    })]);
+  } finally { clearTimeout(timer!); }
 }
 
 // ---- Interfaces --------------------------------------------------
@@ -227,18 +225,24 @@ initializeLocalStorageDB();
 
 // ---- Company / Onboarding API ------------------------------------
 
+async function getCompany(id: string): Promise<Company> {
+  const { data, error } = await withTimeout(supabase.rpc('get_companies').eq('id', id).single());
+  if (error || !data) throw error ?? new Error('Company was not found.');
+  return data as Company;
+}
+
 export async function getCompanies(): Promise<Company[]> {
   try {
     const { data, error } = await withTimeout(
       supabase
-        .from("companies")
-        .select("*")
+        .rpc("get_companies")
         .order("created_at", { ascending: false }),
       8000
     );
     if (error) throw error;
     return data ?? [];
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getCompanies failed, falling back to LocalStorage:", err.message);
     return getLocal<Company[]>("cv_companies", []);
   }
@@ -249,15 +253,15 @@ export async function getCompanyByOwner(ownerId: string): Promise<Company | null
     if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
     const { data, error } = await withTimeout(
       supabase
-        .from("companies")
-        .select("*")
+        .rpc("get_companies")
         .eq("owner_id", ownerId)
         .maybeSingle(),
       8000
     );
     if (error) throw error;
-    return data;
+    return data as Company | null;
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getCompanyByOwner failed, falling back to LocalStorage:", err.message);
     const companies = getLocal<Company[]>("cv_companies", []);
     return companies.find(c => c.owner_id === ownerId) ?? null;
@@ -287,9 +291,9 @@ export async function submitOnboarding(companyData: Partial<Company>): Promise<C
       if (existingCompany) {
         response = await supabase
           .from("companies")
-          .update(insertPayload)
+          .update({ name: insertPayload.name, gstin: insertPayload.gstin, pan: insertPayload.pan, address: insertPayload.address, bank_name: insertPayload.bank_name, account_number: insertPayload.account_number, ifsc_code: insertPayload.ifsc_code, document_url: insertPayload.document_url, status: "pending" })
           .eq("id", existingCompany.id)
-          .select()
+          .select("id")
           .single();
       }
     }
@@ -298,14 +302,15 @@ export async function submitOnboarding(companyData: Partial<Company>): Promise<C
       response = await supabase
         .from("companies")
         .insert(insertPayload)
-        .select()
+        .select("id")
         .single();
     }
 
     const { data, error } = response;
     if (error) throw error;
-    return data;
+    return getCompany(data.id);
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.error("[CouponVault] submitOnboarding failed on the live database:", err.message);
     throw new Error(err.message || "Database rejected the company profile. Check constraints or RLS policies.");
   }
@@ -314,7 +319,6 @@ export async function submitOnboarding(companyData: Partial<Company>): Promise<C
 export async function createCompany(
   companyData: Partial<Company>
 ): Promise<Company> {
-  try {
     const { data, error } = await supabase
       .from("companies")
       .insert({
@@ -322,124 +326,54 @@ export async function createCompany(
         prefix: companyData.prefix?.toUpperCase(),
         status: 'approved'
       })
-      .select()
+      .select("id")
       .single();
     if (error) throw error;
-    return data;
-  } catch (err: any) {
-    console.warn("[CouponVault] createCompany failed, falling back to LocalStorage:", err.message);
-    const companies = getLocal<Company[]>("cv_companies", []);
-    const newCompany: Company = {
-      id: "co_" + Math.random().toString(36).substr(2, 9),
-      name: companyData.name || "Unknown",
-      prefix: companyData.prefix?.toUpperCase() || "UNK",
-      coupon_limit: companyData.coupon_limit || 100,
-      gstin: companyData.gstin,
-      pan: companyData.pan,
-      bank_name: companyData.bank_name,
-      account_number: companyData.account_number,
-      ifsc_code: companyData.ifsc_code,
-      status: 'approved',
-      created_at: new Date().toISOString()
-    };
-    companies.push(newCompany);
-    setLocal("cv_companies", companies);
-    return newCompany;
-  }
+    return getCompany(data.id);
 }
 
 export async function deleteCompany(id: string): Promise<void> {
-  try {
-    const { error: ordersErr } = await supabase.from("orders").delete().eq("company_id", id);
-    if (ordersErr) throw ordersErr;
-    const { error: couponsErr } = await supabase.from("coupons").delete().eq("company_id", id);
-    if (couponsErr) throw couponsErr;
     const { error } = await supabase.from("companies").delete().eq("id", id);
     if (error) throw error;
-  } catch (err: any) {
-    console.warn("[CouponVault] deleteCompany failed, falling back to LocalStorage:", err.message);
-    let companies = getLocal<Company[]>("cv_companies", []);
-    companies = companies.filter(c => c.id !== id);
-    setLocal("cv_companies", companies);
-
-    let cards = getLocal<GiftCard[]>("cv_gift_cards", []);
-    cards = cards.filter(c => c.company_id !== id);
-    setLocal("cv_gift_cards", cards);
-
-    let coupons = getLocal<Coupon[]>("cv_coupons", []);
-    coupons = coupons.filter(c => c.company_id !== id);
-    setLocal("cv_coupons", coupons);
-  }
 }
 
 export async function updateCompanyLimit(id: string, limit: number): Promise<Company> {
-  try {
     const { data, error } = await supabase
       .from("companies")
       .update({ coupon_limit: limit })
       .eq("id", id)
-      .select()
+      .select("id")
       .single();
     if (error) throw error;
-    return data;
-  } catch (err: any) {
-    console.warn("[CouponVault] updateCompanyLimit failed, falling back to LocalStorage:", err.message);
-    const companies = getLocal<Company[]>("cv_companies", []);
-    const co = companies.find(c => c.id === id);
-    if (!co) throw new Error("Company not found");
-    co.coupon_limit = limit;
-    setLocal("cv_companies", companies);
-    return co;
-  }
+    return getCompany(data.id);
 }
 
 export async function adminApproveCompany(id: string): Promise<Company> {
-  try {
     const { data, error } = await supabase
       .from("companies")
       .update({ status: "approved" })
       .eq("id", id)
-      .select()
+      .select("id")
       .single();
     if (error) throw error;
-    return data;
-  } catch (err: any) {
-    console.warn("[CouponVault] adminApproveCompany failed, falling back to LocalStorage:", err.message);
-    const companies = getLocal<Company[]>("cv_companies", []);
-    const co = companies.find(c => c.id === id);
-    if (!co) throw new Error("Company not found");
-    co.status = "approved";
-    setLocal("cv_companies", companies);
-    return co;
-  }
+    return getCompany(data.id);
 }
 
 export async function adminRejectCompany(id: string): Promise<Company> {
-  try {
     const { data, error } = await supabase
       .from("companies")
       .update({ status: "rejected" })
       .eq("id", id)
-      .select()
+      .select("id")
       .single();
     if (error) throw error;
-    return data;
-  } catch (err: any) {
-    console.warn("[CouponVault] adminRejectCompany failed, falling back to LocalStorage:", err.message);
-    const companies = getLocal<Company[]>("cv_companies", []);
-    const co = companies.find(c => c.id === id);
-    if (!co) throw new Error("Company not found");
-    co.status = "rejected";
-    setLocal("cv_companies", companies);
-    return co;
-  }
+    return getCompany(data.id);
 }
 
 export async function getCompanyStats(): Promise<CompanyStats[]> {
   try {
     const { data: companies, error: ce } = await supabase
-      .from("companies")
-      .select("*")
+      .rpc("get_companies")
       .order("created_at", { ascending: false });
     if (ce) throw ce;
 
@@ -453,12 +387,13 @@ export async function getCompanyStats(): Promise<CompanyStats[]> {
       issuedMap[c.company_id] = (issuedMap[c.company_id] ?? 0) + 1;
     });
 
-    return (companies ?? []).map((co) => ({
+    return (companies as Company[] ?? []).map((co: Company) => ({
       company: co,
       issued: issuedMap[co.id] ?? 0,
       remaining: co.coupon_limit - (issuedMap[co.id] ?? 0),
     }));
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getCompanyStats failed, falling back to LocalStorage:", err.message);
     const companies = getLocal<Company[]>("cv_companies", []);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
@@ -543,6 +478,7 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     }
     return dedupedLocal;
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getGiftCards failed, falling back to LocalStorage:", err.message);
     const cards = getLocal<GiftCard[]>("cv_gift_cards", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -663,6 +599,7 @@ export async function getUserOrders(userId: string) {
 
     return [...uniqueLocalOrders, ...dbOrders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getUserOrders failed, falling back to LocalStorage:", err.message);
     const orders = getLocal<Order[]>("cv_orders", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -717,6 +654,7 @@ export async function getUserGiftCards(userId: string): Promise<Coupon[]> {
 
     return [...uniqueLocalCoupons, ...dbCoupons].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getUserGiftCards failed, falling back to LocalStorage:", err.message);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -748,6 +686,7 @@ export async function getCompanyCoupons(companyId: string): Promise<Coupon[]> {
       company_name: d.companies?.name
     }));
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getCompanyCoupons failed, falling back to LocalStorage:", err.message);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -773,6 +712,7 @@ export async function validateCoupon(code: string): Promise<CouponValidation> {
     if (!data || data.length === 0) throw new Error("Invalid coupon code");
     return data[0] as CouponValidation;
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] validateCoupon failed, falling back to LocalStorage:", err.message);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -802,6 +742,7 @@ export async function validateCouponById(id: string): Promise<CouponValidation> 
     if (!data || data.length === 0) throw new Error("Invalid coupon link");
     return data[0] as CouponValidation;
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] validateCouponById failed, falling back to LocalStorage:", err.message);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -822,114 +763,17 @@ export async function validateCouponById(id: string): Promise<CouponValidation> 
   }
 }
 
-export async function redeemCouponAmount(couponId: string, amount: number, options: { allowFallback?: boolean } = {}): Promise<{ remaining_balance: number; status: string }> {
-  try {
-    const { data, error } = await supabase.rpc("redeem_coupon_amount", {
-      p_coupon_id: couponId,
-      p_amount: amount
-    });
-    if (error) throw error;
-    if (!data || data.length === 0) throw new Error("Redemption failed");
-    return {
-      remaining_balance: data[0].remaining_balance,
-      status: data[0].status
-    };
-  } catch (err: any) {
-    // Coupon destinations require a confirmed server redemption before showing success.
-    if (options.allowFallback === false) throw err;
-    console.warn("[CouponVault] redeemCouponAmount RPC failed, attempting direct table update:", err.message);
-    try {
-      const { data: cp, error: updateErr } = await supabase
-        .from("coupons")
-        .update({ is_used: true, status: "redeemed", remaining_balance: 0 })
-        .eq("id", couponId)
-        .select()
-        .single();
-      if (!updateErr && cp) {
-        return { remaining_balance: 0, status: "redeemed" };
-      }
-    } catch {
-      // Ignore direct update error and proceed to local fallback
-    }
-
-    const coupons = getLocal<Coupon[]>("cv_coupons", []);
-    const idx = coupons.findIndex(c => c.id === couponId);
-    if (idx !== -1) {
-      coupons[idx] = { ...coupons[idx], is_used: true, status: "redeemed", remaining_balance: 0 };
-      setLocal("cv_coupons", coupons);
-      return { remaining_balance: 0, status: "redeemed" };
-    }
-    throw err;
-  }
+export async function redeemCouponAmount(couponId: string, amount: number, _options: { allowFallback?: boolean } = {}): Promise<{ remaining_balance: number; status: string }> {
+  const { data, error } = await withTimeout(supabase.rpc('redeem_coupon_amount', { p_coupon_id: couponId, p_amount: amount }));
+  if (error) throw error;
+  if (!data?.[0]) throw new Error('Redemption was not confirmed.');
+  return { remaining_balance: Number(data[0].remaining_balance), status: data[0].status };
 }
-
 export async function markCouponUsedById(id: string): Promise<string> {
-  try {
-    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
-
-    // 1. Get current coupon balance
-    const { data: currentCoupon, error: fetchError } = await supabase
-      .from("coupons")
-      .select("remaining_balance, code")
-      .eq("id", id)
-      .single();
-
-    if (fetchError) throw fetchError;
-    const prevBalance = currentCoupon.remaining_balance;
-
-    // 2. Update coupon
-    const { data: cp, error } = await supabase
-      .from("coupons")
-      .update({ is_used: true, status: "redeemed", remaining_balance: 0 })
-      .eq("id", id)
-      .select()
-      .single();
-    if (error) throw error;
-
-    // 3. Log redemption transaction if there was a balance to redeem
-    if (prevBalance > 0) {
-      const { error: redemptionError } = await supabase
-        .from("redemptions")
-        .insert({
-          coupon_id: id,
-          amount: prevBalance,
-          remaining_balance_after: 0
-        });
-      if (redemptionError) {
-        console.error("[CouponVault] Failed to log redemption transaction:", redemptionError.message);
-      }
-    }
-
-    return cp.code;
-  } catch (err: any) {
-    console.warn("[CouponVault] markCouponUsedById failed, falling back to LocalStorage:", err.message);
-    const coupons = getLocal<Coupon[]>("cv_coupons", []);
-    const idx = coupons.findIndex(c => c.id === id);
-    if (idx === -1) throw new Error("Coupon not found in local storage");
-
-    const prevBalance = coupons[idx].remaining_balance;
-    coupons[idx] = {
-      ...coupons[idx],
-      is_used: true,
-      status: "redeemed",
-      remaining_balance: 0
-    };
-    setLocal("cv_coupons", coupons);
-
-    if (prevBalance > 0) {
-      const redemptions = getLocal<RedemptionTransaction[]>("cv_redemptions", []);
-      redemptions.push({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        coupon_id: id,
-        amount: prevBalance,
-        remaining_balance_after: 0,
-        created_at: new Date().toISOString()
-      });
-      setLocal("cv_redemptions", redemptions);
-    }
-
-    return coupons[idx].code;
-  }
+  const coupon = await validateCouponById(id);
+  if (!coupon.remaining_balance || coupon.remaining_balance <= 0) throw new Error('No coupon balance remains.');
+  await redeemCouponAmount(id, coupon.remaining_balance);
+  return coupon.coupon_code;
 }
 
 export async function getRedemptionTransactions(couponId?: string, companyId?: string): Promise<RedemptionTransaction[]> {
@@ -985,6 +829,7 @@ export async function getRedemptionTransactions(couponId?: string, companyId?: s
 
     return combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getRedemptionTransactions failed, falling back to LocalStorage:", err.message);
     const redemptions = getLocal<RedemptionTransaction[]>("cv_redemptions", []);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
@@ -1024,40 +869,11 @@ export async function issueCoupon(
   companyId: string,
   userId: string
 ): Promise<{ coupon_code: string; order_id: string; coupon_id: string }> {
-  // Legacy method fallback: Create a default ₹50 gift card for that company if it exists
-  try {
-    const { data: giftCards, error } = await supabase
-      .from("gift_cards")
-      .select("id")
-      .eq("company_id", companyId)
-      .limit(1);
-    if (!error && giftCards && giftCards.length > 0) {
-      return purchaseGiftCard(giftCards[0].id, userId, "legacy_user@couponvault.com", 50);
-    }
-  } catch {
-    // Ignore and fallback
-  }
-  
-  // Fallback storage fallback
-  const cards = getLocal<GiftCard[]>("cv_gift_cards", []);
-  let gc = cards.find(c => c.company_id === companyId);
-  if (!gc) {
-    gc = {
-      id: "gc_temp_" + companyId,
-      company_id: companyId,
-      title: "Promotional Gift Card",
-      description: "Default voucher",
-      value: 50,
-      price: 45,
-      expiry_date: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
-      banner_image: "",
-      terms: "Legacy support",
-      created_at: new Date().toISOString()
-    };
-    cards.push(gc);
-    setLocal("cv_gift_cards", cards);
-  }
-  return purchaseGiftCard(gc.id, userId, "legacy_user@couponvault.com", 50);
+  const { data, error } = await supabase.from("gift_cards").select("id,price")
+    .eq("company_id", companyId).eq("is_active", true).limit(1).maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Select an available gift card before purchasing.");
+  return purchaseGiftCard(data.id, userId, "", data.price);
 }
 
 // ---- Admin Management helpers ------------------------------------
@@ -1078,6 +894,7 @@ export async function adminGetPurchasedCoupons(page: number = 0, pageSize: numbe
     if (error) throw error;
     return data ?? [];
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] adminGetPurchasedCoupons failed, falling back to LocalStorage:", err.message);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -1108,10 +925,10 @@ export async function adminSuspendCompany(companyId: string): Promise<Company> {
     .from("companies")
     .update({ status: "suspended" })
     .eq("id", companyId)
-    .select()
+    .select("id")
     .single();
   if (error) throw error;
-  return data;
+  return getCompany(data.id);
 }
 
 export async function getUserProfileData(userId: string): Promise<{
@@ -1286,11 +1103,8 @@ export async function updateUserPaypalEmail(userId: string, email: string): Prom
 }
 
 // DEPRECATED: Do not use for financial transactions on the frontend
-export async function updateBalances(newBalance: number): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.user?.id) {
-    await supabase.from("profiles").update({ wallet_balance: newBalance }).eq("id", session.user.id);
-  }
+export async function updateBalances(_newBalance: number): Promise<void> {
+  throw new Error('Balances can only be changed by verified server operations.');
 }
 
 // DEPRECATED & DISABLED: Direct client-side wallet funding is disabled for security.
@@ -1359,7 +1173,7 @@ export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
       payment_method: formatPaymentMethod(d.payment_method),
     }));
     return allCombined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  } catch (err: any) {
+  } catch {
     const localDeposits = getLocal<UserDeposit[]>("cv_deposits", []);
     return localDeposits.filter(d => d.user_id === userId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
@@ -1486,55 +1300,17 @@ export async function verifyPayPalPayment(orderId: string): Promise<{ verified: 
   const isVerified = !!data?.verified;
   const capturedAmount = data?.amount ? Number(data.amount) : undefined;
 
-  if (isVerified && capturedAmount && capturedAmount > 0) {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.id) {
-        // Execute backup wallet credit RPC to ensure balance is always updated
-        await supabase.rpc('add_funds_secure', {
-          p_user_id: user.id,
-          p_amount: capturedAmount,
-        });
-
-        // Record deposit log if table exists
-        try {
-          await supabase.from('deposits').insert({
-            user_id: user.id,
-            amount: capturedAmount,
-            payment_method: 'PayPal',
-            reference_id: orderId,
-            status: 'completed',
-          });
-        } catch {
-          // Ignore missing deposits table error
-        }
-      }
-    } catch (backupErr) {
-      console.warn('Backup wallet credit RPC notice:', backupErr);
-    }
-  }
-
   return { verified: isVerified, amount: capturedAmount };
 }
 
 // ---- Withdrawal API ----------------------------------------------------
 
-export async function createWithdrawal(userId: string, amount: number, routing: string, account: string) {
-  const { data, error } = await withTimeout(
-    supabase
-      .from('withdrawals')
-      .insert({
-        user_id: userId,
-        amount: amount,
-        routing_number: routing,
-        account_number: account,
-        status: 'pending'
-      })
-      .select()
-      .single()
-  );
-
+export async function createWithdrawal(_userId: string, amount: number, routing: string, account: string, currency = 'USD') {
+  const { data, error } = await withTimeout(supabase.rpc('request_withdrawal', {
+    p_amount: amount, p_currency: currency, p_routing: routing, p_account: account,
+  }));
   if (error) throw error;
+  if (!data) throw new Error('Withdrawal was not confirmed.');
   return data;
 }
 
@@ -1587,6 +1363,7 @@ export async function adminGetSettlements(): Promise<Settlement[]> {
     
     return [...uniqueLocal, ...(data ?? [])] as Settlement[];
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] adminGetSettlements fallback:", err.message);
     const settlements = getLocal<Settlement[]>("cv_settlements", []);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -1621,6 +1398,7 @@ export async function merchantGetSettlements(companyId: string): Promise<Settlem
     
     return [...uniqueLocal, ...(data ?? [])] as Settlement[];
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] merchantGetSettlements fallback:", err.message);
     const settlements = getLocal<Settlement[]>("cv_settlements", []).filter(s => s.company_id === companyId);
     const companies = getLocal<Company[]>("cv_companies", []);
@@ -1695,6 +1473,7 @@ export async function adminGetWithdrawals(): Promise<AdminWithdrawal[]> {
     }
     return rawList;
   } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
     console.warn("adminGetWithdrawals error:", err);
     return getLocal<AdminWithdrawal[]>("cv_withdrawals", []);
   }
@@ -1851,4 +1630,14 @@ export async function adminUpdateTicketStatus(
     8000
   );
   if (error) throw error;
+}
+
+export async function adminSetAccountLocked(userId: string, locked: boolean): Promise<void> {
+  const { error } = await withTimeout(supabase.rpc('admin_set_account_locked', { p_user_id: userId, p_locked: locked }));
+  if (error) throw error;
+}
+export async function adminGetAccountLocks(): Promise<Record<string, boolean>> {
+  const { data, error } = await withTimeout(supabase.rpc('admin_get_account_locks'));
+  if (error) throw error;
+  return Object.fromEntries((data ?? []).map((row: { id: string; is_locked: boolean }) => [row.id, row.is_locked]));
 }

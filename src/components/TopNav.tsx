@@ -47,6 +47,7 @@ export default function TopNav({ portal }: TopNavProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const [showConfirmSignOut, setShowConfirmSignOut] = useState(false);
 
   useEffect(() => {
@@ -71,12 +72,13 @@ export default function TopNav({ portal }: TopNavProps) {
 
   const confirmSignOut = async () => {
     setShowConfirmSignOut(false);
-    await signOut();
-    navigate('/');
+    try { await signOut(); navigate('/'); }
+    catch (error) { setSignOutError(error instanceof Error ? error.message : 'Sign out failed. Please retry.'); }
   };
 
   return (
     <nav className="flex items-center gap-1 md:gap-2 overflow-x-auto py-1 no-scrollbar w-full md:w-auto md:justify-center" style={{ scrollbarWidth: 'none' }}>
+      {signOutError && <span role="alert">{signOutError}</span>}
       {links.map((link, index) => {
         const isActive = index === 0
           ? location.pathname === link.path

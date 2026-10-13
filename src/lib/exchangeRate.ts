@@ -1,6 +1,5 @@
 // src/lib/exchangeRate.ts
-// Single-currency / 1:1 formatting & rate utilities.
-// All FX conversion disabled — rate is fixed to 1:1 across all currencies.
+// Currency formatting and fresh published exchange rates.
 
 // ── Zero-decimal currencies (no cents)
 const ZERO_DP = new Set(['JPY', 'KRW', 'VND', 'IDR', 'UGX', 'RWF', 'TZS', 'CLP', 'GNF']);
@@ -14,29 +13,25 @@ function decimalsForCurrency(currency: string): number {
   return 2;
 }
 
-/**
- * Get the exchange rate between two currencies.
- * Always returns 1 (no currency conversion).
- */
-export async function getRate(_from: string, _to: string): Promise<number> {
-  return 1;
+/** Read only fresh published rates; missing rates never silently become 1. */
+export async function getRate(from: string, to: string): Promise<number> {
+  if (from.toUpperCase() === to.toUpperCase()) return 1;
+  const { supabase } = await import('./supabase');
+  const { data, error } = await supabase.from('exchange_rates').select('target_currency,rate')
+    .eq('base_currency', 'USD')
+    .in('target_currency', [from.toUpperCase(), to.toUpperCase()])
+    .gte('updated_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString());
+  if (error) throw new Error('Exchange rates are unavailable.');
+  const rates: Record<string, number> = { USD: 1 };
+  for (const row of data ?? []) rates[row.target_currency] = Number(row.rate);
+  const rate = rates[to.toUpperCase()] / rates[from.toUpperCase()];
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error('No current exchange rate for this currency.');
+  return rate;
 }
-
-/**
- * Convert an amount from USD to a target currency.
- * Returns 1:1 amount with localized formatting.
- */
-export async function convertFromUSD(
-  amountUSD: number,
-  targetCurrency: string,
-): Promise<{ amount: number; rate: number; formatted: string }> {
-  const dp     = decimalsForCurrency(targetCurrency);
-  const amount = parseFloat(amountUSD.toFixed(dp));
-  return {
-    amount,
-    rate: 1,
-    formatted: formatCurrency(amount, targetCurrency),
-  };
+export async function convertFromUSD(amountUSD: number, targetCurrency: string) {
+  const rate = await getRate('USD', targetCurrency);
+  const amount = Number((amountUSD * rate).toFixed(decimalsForCurrency(targetCurrency)));
+  return { amount, rate, formatted: formatCurrency(amount, targetCurrency) };
 }
 
 /**
@@ -72,6 +67,6 @@ export function warmExchangeRateCache(): void {
  * Returns cache age in seconds.
  */
 export function getCacheAge(): number | null {
-  return 0;
+  return null;
 }
 

@@ -1,6 +1,6 @@
 // server/services/PayPalService.ts
 // Wraps PayPal REST API v2 using direct fetch calls (no extra SDK dependency).
-import { createHmac } from 'crypto';
+
 import type {
   PaymentServiceI,
   CreatePaymentResult,
@@ -117,7 +117,7 @@ export class PayPalService implements PaymentServiceI {
     }
 
     const capture = order.purchase_units?.[0]?.payments?.captures?.[0];
-    if (!capture) {
+    if (order.purchase_units?.length !== 1 || order.purchase_units?.[0]?.payments?.captures?.length !== 1 || capture?.status !== 'COMPLETED') {
       throw new Error('No capture record found in PayPal order.');
     }
 

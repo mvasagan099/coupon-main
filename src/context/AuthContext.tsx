@@ -1,98 +1,83 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
-import { supabase, ensureUserProfile, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, ensureUserProfile, getCompanyByOwner, isSupabaseConfigured } from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   isAdmin: boolean;
+  isMerchant: boolean;
   isLoading: boolean;
+  authError: string | null;
   signOut: () => Promise<void>;
 }
-
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  session: null,
-  isAdmin: false,
-  isLoading: true,
-  signOut: async () => {},
-});
-
+async function timed<T>(operation: PromiseLike<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  try {
+    return await Promise.race([Promise.resolve(operation), new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Session verification timed out. Please retry.')), 10000);
+    })]);
+  } finally { clearTimeout(timer!); }
+}
+const AuthContext = createContext<AuthContextType>({ user: null, session: null, isAdmin: false,
+  isMerchant: false, isLoading: true, authError: null, signOut: async () => {} });
 export const useAuth = () => useContext(AuthContext);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isMerchant, setIsMerchant] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-
+  const [authError, setAuthError] = useState<string | null>(null);
   useEffect(() => {
-    // Safety timeout: guarantee the UI unblocks even if auth never resolves
-    const safetyTimer = setTimeout(() => {
-      setIsLoading(false);
-    }, 10000);
-
-    // Get initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setIsAdmin(session?.user?.app_metadata?.role === 'admin');
-      if (session?.user?.id) {
-        try { await ensureUserProfile(session.user.id); } catch { /* non-critical */ }
+    let disposed = false;
+    let revision = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const applySession = async (candidate: Session | null, current: number) => {
+      try {
+        if (!candidate || !isSupabaseConfigured) {
+          if (!disposed && current === revision) { setUser(null); setSession(null); setIsMerchant(false); setAuthError(null); }
+          return;
+        }
+        const { data, error } = await timed(supabase.auth.getUser(candidate.access_token));
+        if (error || !data.user || data.user.is_anonymous) throw new Error('Please sign in again.');
+        const { data: active, error: lockError } = await timed(supabase.rpc('is_account_active', { p_user_id: data.user.id }));
+        if (lockError) throw new Error('Account access could not be verified. Please retry.');
+        if (!active) throw new Error('This account is locked. Contact support.');
+        await timed(ensureUserProfile(data.user.id));
+        const company = await timed(getCompanyByOwner(data.user.id));
+        if (!disposed && current === revision) {
+          setUser(data.user); setSession(candidate); setIsMerchant(!!company); setAuthError(null);
+        }
+      } catch (error) {
+        if (!disposed && current === revision) {
+          setUser(null); setSession(null); setIsMerchant(false);
+          setAuthError(error instanceof Error ? error.message : 'Session verification failed.');
+        }
+      } finally {
+        if (!disposed && current === revision) setIsLoading(false);
       }
-      setIsLoading(false);
-      clearTimeout(safetyTimer);
-    }).catch(() => {
-      // If getSession itself fails (e.g. misconfigured URL), still unblock the UI
-      setIsLoading(false);
-      clearTimeout(safetyTimer);
-    });
-
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setIsAdmin(session?.user?.app_metadata?.role === 'admin');
-      if (session?.user?.id) {
-        try { await ensureUserProfile(session.user.id); } catch { /* non-critical */ }
-      }
-      setIsLoading(false);
-      clearTimeout(safetyTimer);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(safetyTimer);
     };
+    const schedule = (candidate: Session | null) => {
+      const current = ++revision;
+      setIsLoading(true);
+      clearTimeout(timer);
+      // Leave the auth callback before making any asynchronous Supabase calls.
+      timer = setTimeout(() => { void applySession(candidate, current); }, 0);
+    };
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, candidate) => schedule(candidate));
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!revision) schedule(data.session);
+    }).catch(() => schedule(null));
+    return () => { disposed = true; revision++; clearTimeout(timer); subscription.unsubscribe(); };
   }, []);
 
   const signOut = async () => {
-    try {
-      if (isSupabaseConfigured) {
-        await supabase.auth.signOut();
-      }
-    } catch {
-      console.warn("Native signout failed, forcing local cleanup");
-    } finally {
-      setUser(null);
-      setSession(null);
-      setIsAdmin(false);
-      
-      // Force clear any lingering Supabase tokens to prevent redirect loops
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
-          localStorage.removeItem(key);
-        }
-      });
-    }
+    const { error } = await supabase.auth.signOut();
+    if (error) throw new Error('Sign out failed. Please retry.');
+    setUser(null); setSession(null); setIsMerchant(false); setAuthError(null);
   };
-
-  return (
-    <AuthContext.Provider value={{ user, session, isAdmin, isLoading, signOut }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, session, isAdmin: user?.app_metadata?.role === 'admin',
+    isMerchant, isLoading, authError, signOut }}>{children}</AuthContext.Provider>;
 }

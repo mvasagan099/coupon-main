@@ -18,7 +18,6 @@ import {
 } from '../lib/paymentGateway';
 import type { Coupon, GiftCard, Order, RedemptionTransaction, Withdrawal, UserDeposit } from '../lib/supabase';
 import {
-  supabase,
   getGiftCards,
   getRedemptionTransactions,
   getUserGiftCards,
@@ -98,6 +97,13 @@ export default function UserDashboard() {
   const [showAddMoneyModal, setShowAddMoneyModal] = useState(false);
   const [addMoneyAmount, setAddMoneyAmount] = useState('500');
   const [addMoneyLoading, setAddMoneyLoading] = useState(false);
+  const paymentRecoveryKey = `cv_pending_paypal_${user?.id ?? 'signed-out'}`;
+  const [pendingPayPalOrder, setPendingOrder] = useState<string | null>(() => localStorage.getItem(paymentRecoveryKey));
+  const setPendingPayPalOrder = (order: string | null) => {
+    if (order) localStorage.setItem(paymentRecoveryKey, order);
+    else localStorage.removeItem(paymentRecoveryKey);
+    setPendingOrder(order);
+  };
   const [selectedGateway, setSelectedGateway] = useState<PaymentGateway>('paypal');
   const [deposits, setDeposits] = useState<UserDeposit[]>([]);
   const [depositPage, setDepositPage] = useState(1);
@@ -115,25 +121,22 @@ export default function UserDashboard() {
   const [userCurrency, setUserCurrency]       = useState<string>('USD');
   const [profileCountry, setProfileCountry]   = useState<CountryInfo | null>(null);
   const [savingProfile, setSavingProfile]     = useState(false);
-  const [userFxRate, setUserFxRate]           = useState<number>(1);
+  const [userFxRate, setUserFxRate]           = useState<number>(0);
   const [convertedWalletBalance, setConvertedWalletBalance] = useState<{ amount: number; formatted: string } | null>(null);
 
   useEffect(() => {
-    if (userCurrency && userCurrency !== 'USD') {
-      getRate('USD', userCurrency).then((r) => setUserFxRate(r)).catch(() => setUserFxRate(1));
-    } else {
-      setUserFxRate(1);
-    }
-  }, [userCurrency]);
-
-  useEffect(() => {
-    if (userCurrency && userCurrency !== 'USD') {
-      convertFromUSD(walletBalance, userCurrency)
-        .then((res) => setConvertedWalletBalance({ amount: res.amount, formatted: res.formatted }))
-        .catch(() => setConvertedWalletBalance(null));
-    } else {
-      setConvertedWalletBalance(null);
-    }
+    let active = true;
+    const load = async () => {
+      try {
+        const rate = await getRate('USD', userCurrency);
+        const converted = await convertFromUSD(walletBalance, userCurrency);
+        if (active) { setUserFxRate(rate); setConvertedWalletBalance(converted); }
+      } catch {
+        if (active) { setUserFxRate(0); setConvertedWalletBalance(null); }
+      }
+    };
+    void load();
+    return () => { active = false; };
   }, [walletBalance, userCurrency]);
 
   const [selectedProduct, setSelectedProduct] = useState<GiftCard | null>(null);
@@ -153,9 +156,7 @@ export default function UserDashboard() {
     }
   }, [navigate, section]);
 
-  useEffect(() => {
-    setMarketplacePage(1);
-  }, [catalogSearch, priceFilter]);
+
 
   useEffect(() => {
     if (!user?.id) return;
@@ -375,12 +376,10 @@ export default function UserDashboard() {
 
   // ── Stripe Elements mount / unmount hook ─────────────────────────────────────
   const stripeElementsRef = useRef<any>(null);
-  const [_stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
   const [stripeLoading, setStripeLoading] = useState(false);
 
   useEffect(() => {
     if (!showAddMoneyModal || selectedGateway !== 'stripe') {
-      setStripeClientSecret(null);
       stripeElementsRef.current = null;
       return;
     }
@@ -406,7 +405,6 @@ export default function UserDashboard() {
           throw new Error('Stripe client secret not received.');
         }
 
-        setStripeClientSecret(orderData.clientSecret);
 
         // Mount Stripe elements
         setTimeout(() => {
@@ -436,7 +434,7 @@ export default function UserDashboard() {
       const el = document.getElementById('stripe-payment-element');
       if (el) el.innerHTML = '';
     };
-  }, [showAddMoneyModal, selectedGateway, addMoneyAmount]);
+  }, [showAddMoneyModal, selectedGateway, addMoneyAmount, toastError]);
 
   // ── Stripe payment handler ───────────────────────────────────────────────────
   const handleStripePayment = async () => {
@@ -498,6 +496,7 @@ export default function UserDashboard() {
     event.preventDefault();
     if (!user?.id) return;
     const enteredAmount = parseFloat(withdrawForm.amount);
+    if (userCurrency !== 'USD' && !userFxRate) { toastError('Exchange rate unavailable', 'Please retry later.'); return; }
     const maxLocal = userCurrency !== 'USD' ? walletBalance * userFxRate : walletBalance;
 
     if (isNaN(enteredAmount) || enteredAmount <= 0 || enteredAmount > maxLocal + 0.01) {
@@ -522,7 +521,8 @@ export default function UserDashboard() {
   const handleWithdrawalConfirm = async () => {
     if (!user?.id) return;
     const enteredAmount = parseFloat(withdrawForm.amount);
-    const amountUSD = userCurrency !== 'USD' ? enteredAmount / (userFxRate || 1) : enteredAmount;
+    if (userCurrency !== 'USD' && !userFxRate) { toastError('Exchange rate unavailable', 'Please retry once a current rate is available.'); return; }
+    const amountUSD = userCurrency !== 'USD' ? enteredAmount / userFxRate : enteredAmount;
 
     setWithdrawLoading(true);
     setWithdrawStep(2); // Go to processing view
@@ -544,7 +544,7 @@ export default function UserDashboard() {
         accountStr = withdrawForm.bankAccount.trim();
       }
 
-      await createWithdrawal(user.id, amountUSD, routingStr, accountStr);
+      await createWithdrawal(user.id, enteredAmount, routingStr, accountStr, userCurrency);
 
       await refreshWalletBalance();
       await loadData();
@@ -575,7 +575,7 @@ export default function UserDashboard() {
         date: order.created_at,
         brand: order.company?.name || 'Marketplace purchase',
         type: 'Purchase',
-        amount: `-${formatCurrency(order.amount * userFxRate, userCurrency)}`,
+        amount: `-${(userFxRate ? formatCurrency(order.amount * userFxRate, userCurrency) : formatCurrency(order.amount, 'USD'))}`,
         status: 'Completed',
       });
     });
@@ -585,7 +585,7 @@ export default function UserDashboard() {
         date: redemption.created_at,
         brand: redemption.company_name || 'Merchant',
         type: 'Redemption',
-        amount: `-${formatCurrency(redemption.amount * userFxRate, userCurrency)}`,
+        amount: `-${(userFxRate ? formatCurrency(redemption.amount * userFxRate, userCurrency) : formatCurrency(redemption.amount, 'USD'))}`,
         status: 'Settled',
       });
     });
@@ -595,7 +595,7 @@ export default function UserDashboard() {
         date: deposit.created_at,
         brand: cleanPaymentMethod(deposit.payment_method),
         type: 'Deposit',
-        amount: `+${formatCurrency(deposit.amount * userFxRate, userCurrency)}`,
+        amount: `+${(userFxRate ? formatCurrency(deposit.amount * userFxRate, userCurrency) : formatCurrency(deposit.amount, 'USD'))}`,
         status: deposit.status === 'completed' ? 'Completed' : 'Pending',
       });
     });
@@ -605,7 +605,7 @@ export default function UserDashboard() {
         date: w.created_at,
         brand: `Payout (${w.account_number ? '...' + w.account_number.slice(-4) : 'Bank'})`,
         type: 'Withdrawal',
-        amount: `-${formatCurrency(w.amount * userFxRate, userCurrency)}`,
+        amount: `-${(userFxRate ? formatCurrency(w.amount * userFxRate, userCurrency) : formatCurrency(w.amount, 'USD'))}`,
         status: w.status === 'completed' ? 'Completed' : w.status === 'rejected' ? 'Rejected' : 'Pending',
       });
 
@@ -614,14 +614,14 @@ export default function UserDashboard() {
           date: w.updated_at || w.created_at,
           brand: `Refund (Rejected Payout)`,
           type: 'Refund',
-          amount: `+${formatCurrency(w.amount * userFxRate, userCurrency)}`,
+          amount: `+${(userFxRate ? formatCurrency(w.amount * userFxRate, userCurrency) : formatCurrency(w.amount, 'USD'))}`,
           status: 'Completed',
         });
       }
     });
 
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [orders, redemptions, deposits, withdrawals]);
+  }, [orders, redemptions, deposits, withdrawals, userCurrency, userFxRate]);
 
   const filteredCatalog = useMemo(() => {
     return giftCards.filter((card) => {
@@ -703,10 +703,10 @@ export default function UserDashboard() {
                 style={{ width: '100%', borderRadius: '99px', padding: '0.8rem 1.25rem 0.8rem 2.8rem', background: 'var(--surface-soft)' }}
                 placeholder="Search brand or card..."
                 value={catalogSearch}
-                onChange={(event) => setCatalogSearch(event.target.value)}
+                onChange={(event) => { setCatalogSearch(event.target.value); setMarketplacePage(1); }}
               />
             </div>
-            <select className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => setPriceFilter(event.target.value)}>
+            <select className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => { setPriceFilter(event.target.value); setMarketplacePage(1); }}>
               <option value="All">All prices</option>
               <option value="low">Under $500</option>
               <option value="mid">$500 - $2000</option>
@@ -785,7 +785,7 @@ export default function UserDashboard() {
                         <div style={{ position: 'relative', zIndex: 3 }}>
                           <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
                           <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <Zap size={14} /> {userCurrency !== 'USD' ? `${formatCurrency(prc * userFxRate, userCurrency)} now` : `$${prc.toFixed(2)} now`}, value 🪙{val.toFixed(2)}
+                            <Zap size={14} /> {userCurrency !== 'USD' ? `${(userFxRate ? formatCurrency(prc * userFxRate, userCurrency) : formatCurrency(prc, 'USD'))} now` : `$${prc.toFixed(2)} now`}, value 🪙{val.toFixed(2)}
                           </div>
                         </div>
                       </div>
@@ -879,7 +879,7 @@ export default function UserDashboard() {
           <div className="bento-grid fade-in-cards" style={{ marginBottom: '2rem' }}>
             <DashboardCard
               title="Wallet balance"
-              value={userCurrency !== 'USD' ? (convertedWalletBalance?.formatted ?? formatCurrency(walletBalance * userFxRate, userCurrency)) : `$${walletBalance.toFixed(2)}`}
+              value={userCurrency !== 'USD' ? (convertedWalletBalance?.formatted ?? (userFxRate ? (userFxRate ? formatCurrency(walletBalance * userFxRate, userCurrency) : formatCurrency(walletBalance, 'USD')) : 'Exchange rate unavailable')) : `$${walletBalance.toFixed(2)}`}
               subValue={userCurrency !== 'USD' ? `Base: $${walletBalance.toFixed(2)} USD` : undefined}
               variant="primary"
               icon={<Wallet size={20} />}
@@ -888,7 +888,7 @@ export default function UserDashboard() {
             <DashboardCard title="Transactions" value={String(combinedTransactions.length)} variant="violet" icon={<ArrowLeftRight size={20} />} />
             <DashboardCard
               title="Redeemed value"
-              value={userCurrency !== 'USD' ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : `$${totalRedeemedAmount.toFixed(2)}`}
+              value={userCurrency !== 'USD' ? (userFxRate ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : formatCurrency(totalRedeemedAmount, 'USD')) : `$${totalRedeemedAmount.toFixed(2)}`}
               variant="amber"
               icon={<Gift size={20} />}
             />
@@ -938,7 +938,7 @@ export default function UserDashboard() {
                 </div>
                 <div style={{ fontSize: '2.8rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1 }}>
                   {userCurrency !== 'USD'
-                    ? (convertedWalletBalance?.formatted ?? formatCurrency(walletBalance * userFxRate, userCurrency))
+                    ? (convertedWalletBalance?.formatted ?? (userFxRate ? (userFxRate ? formatCurrency(walletBalance * userFxRate, userCurrency) : formatCurrency(walletBalance, 'USD')) : 'Exchange rate unavailable'))
                     : `$${walletBalance.toFixed(2)}`}
                 </div>
                 {userCurrency !== 'USD' && (
@@ -961,7 +961,7 @@ export default function UserDashboard() {
                   </div>
                 )}
                 <p style={{ color: 'rgba(255,255,255,0.75)', lineHeight: 1.6, marginTop: '0.75rem', fontSize: '0.92rem' }}>
-                  Use your stored balance for instant purchases, top up funds, and test wallet flows with the mock gateway.
+                  Use your stored balance for instant purchases, top up funds through verified payment gateways.
                 </p>
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '1.25rem' }}>
                   <button
@@ -992,7 +992,7 @@ export default function UserDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Redeemed amount</span>
                   <strong style={{ fontSize: '1.1rem' }}>
-                    {userCurrency !== 'USD' ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : `$${totalRedeemedAmount.toFixed(2)}`}
+                    {userCurrency !== 'USD' ? (userFxRate ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : formatCurrency(totalRedeemedAmount, 'USD')) : `$${totalRedeemedAmount.toFixed(2)}`}
                   </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
@@ -1032,7 +1032,7 @@ export default function UserDashboard() {
                         <td style={{ fontWeight: 600 }}>{cleanPaymentMethod(d.payment_method)}</td>
                         <td className="mono text-muted" style={{ fontSize: '0.8rem' }}>{d.reference_id || d.id.slice(0, 10)}</td>
                         <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>
-                          +{formatCurrency(d.amount * userFxRate, userCurrency)}
+                          +{(userFxRate ? formatCurrency(d.amount * userFxRate, userCurrency) : formatCurrency(d.amount, 'USD'))}
                         </td>
                         <td>
                           <span className={`badge ${d.status === 'completed' ? 'badge-green' : d.status === 'failed' ? 'badge-red' : 'badge-amber'}`}>
@@ -1092,7 +1092,7 @@ export default function UserDashboard() {
                       return (
                         <tr key={w.id}>
                           <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(w.created_at).toLocaleString()}</td>
-                          <td className="mono font-medium">{formatCurrency(w.amount * userFxRate, userCurrency)}</td>
+                          <td className="mono font-medium">{(userFxRate ? formatCurrency(w.amount * userFxRate, userCurrency) : formatCurrency(w.amount, 'USD'))}</td>
                           <td>
                             <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
                               {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
@@ -1635,7 +1635,7 @@ export default function UserDashboard() {
                 <span style={{ color: 'var(--text-3)' }}>Purchase Price</span>
                 <strong style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>
                   {userCurrency !== 'USD'
-                    ? formatCurrency((selectedProduct.price ?? 0) * userFxRate, userCurrency)
+                    ? (userFxRate ? formatCurrency((selectedProduct.price ?? 0) * userFxRate, userCurrency) : formatCurrency((selectedProduct.price ?? 0), 'USD'))
                     : `$${(selectedProduct.price ?? 0).toFixed(2)}`}
                 </strong>
               </div>
@@ -1643,7 +1643,7 @@ export default function UserDashboard() {
                 <span style={{ color: 'var(--text-3)' }}>Cashback (10%)</span>
                 <strong style={{ color: '#10b981' }}>
                   {userCurrency !== 'USD'
-                    ? `+${formatCurrency((selectedProduct.value ?? 0) * 0.1 * userFxRate, userCurrency)}`
+                    ? `+${(userFxRate ? formatCurrency((selectedProduct.value ?? 0) * 0.1 * userFxRate, userCurrency) : formatCurrency((selectedProduct.value ?? 0) * 0.1, 'USD'))}`
                     : `+$${((selectedProduct.value ?? 0) * 0.1).toFixed(2)}`}
                 </strong>
               </div>
@@ -1655,7 +1655,7 @@ export default function UserDashboard() {
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Wallet Balance</div>
                 <strong style={{ fontSize: '1.1rem' }}>
                   {userCurrency !== 'USD'
-                    ? formatCurrency(walletBalance * userFxRate, userCurrency)
+                    ? (userFxRate ? (userFxRate ? formatCurrency(walletBalance * userFxRate, userCurrency) : formatCurrency(walletBalance, 'USD')) : 'Exchange rate unavailable')
                     : `$${walletBalance.toFixed(2)}`}
                 </strong>
               </div>
@@ -1778,7 +1778,7 @@ export default function UserDashboard() {
                   />
                   {userCurrency !== 'USD' && withdrawForm.amount && !isNaN(parseFloat(withdrawForm.amount)) && (
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: '0.3rem', fontWeight: 500 }}>
-                      ≈ ${(parseFloat(withdrawForm.amount) / (userFxRate || 1)).toFixed(2)} USD will be deducted from your wallet
+                      ≈ ${(userFxRate ? (parseFloat(withdrawForm.amount) / userFxRate).toFixed(2) : 'unavailable')} USD will be deducted from your wallet
                     </div>
                   )}
                 </div>
@@ -1845,7 +1845,7 @@ export default function UserDashboard() {
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: '0.4rem' }}>
                     {userCurrency !== 'USD'
-                      ? `≈ $${(parseFloat(withdrawForm.amount || '0') / (userFxRate || 1)).toFixed(2)} USD deducted from wallet`
+                      ? `≈ $${(userFxRate ? (parseFloat(withdrawForm.amount || '0') / userFxRate).toFixed(2) : 'unavailable')} USD deducted from wallet`
                       : 'US Dollar'}
                   </div>
                 </div>
@@ -2113,128 +2113,47 @@ export default function UserDashboard() {
                 )}
 
                 {/* ── PayPal UI (original flow preserved) ── */}
-                {selectedGateway === 'paypal' && (
+                {pendingPayPalOrder && <button className="btn btn-secondary" disabled={addMoneyLoading} onClick={async () => {
+                  setAddMoneyLoading(true);
+                  try {
+                    const result = await verifyPayPalPayment(pendingPayPalOrder);
+                    if (!result.verified) throw new Error('Wallet credit is still pending.');
+                    await refreshWalletBalance();
+                    await loadData();
+                    setPendingPayPalOrder(null);
+                    success('Payment confirmed', 'Your wallet has been credited.');
+                    setShowAddMoneyModal(false);
+                  } catch (err) { toastError('Credit pending', getErrorMessage(err, 'Retry verification later; do not pay again.')); }
+                  finally { setAddMoneyLoading(false); }
+                }}>Retry payment verification</button>}
+                {selectedGateway === 'paypal' && !pendingPayPalOrder && (
                 <PayPalButtons
                   style={{ layout: "vertical", color: "blue", shape: "rect", label: "pay" }}
-                  createOrder={async (_data, actions) => {
-                    const amountNum = parseFloat(addMoneyAmount);
-                    if (isNaN(amountNum) || amountNum <= 0) {
-                      toastError('Invalid amount', 'Please enter a valid amount.');
-                      return "";
-                    }
-                    try {
-                      const order = await createPayPalOrder({ amount: amountNum, currency: "USD" });
-                      if (order?.id) return order.id;
-                    } catch (err: unknown) {
-                      console.warn("createPayPalOrder notice, using client order creation:", err);
-                    }
-                    if (actions && actions.order) {
-                      return actions.order.create({
-                        intent: "CAPTURE",
-                        purchase_units: [{
-                          amount: {
-                            currency_code: "USD",
-                            value: amountNum.toFixed(2),
-                          },
-                        }],
-                      });
-                    }
-                    return "";
+                  createOrder={async () => {
+                    const amount = Number(addMoneyAmount);
+                    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error('Enter a valid amount up to $100,000.');
+                    const order = await createPayPalOrder({ amount, currency: 'USD' });
+                    return order.id;
                   }}
-                  onApprove={async (data, actions) => {
+                  onApprove={async (data) => {
+                    setPendingPayPalOrder(data.orderID);
                     setAddMoneyLoading(true);
                     try {
-                      let capturedAmount = parseFloat(addMoneyAmount);
-                      let verified = false;
-
-                      // 1. Attempt server edge function verification
-                      try {
-                        const result = await verifyPayPalPayment(data.orderID);
-                        if (result.verified) {
-                          verified = true;
-                          if (result.amount && result.amount > 0) {
-                            capturedAmount = result.amount;
-                          }
-                        }
-                      } catch (verErr) {
-                        console.warn("Server verification notice, using client capture fallback:", verErr);
-                      }
-
-                      // 2. Client capture fallback if edge function did not complete
-                      if (!verified && actions && actions.order) {
-                        try {
-                          const details = await actions.order.capture();
-                          const rawVal = details.purchase_units?.[0]?.payments?.captures?.[0]?.amount?.value || details.purchase_units?.[0]?.amount?.value;
-                          if (rawVal) {
-                            capturedAmount = parseFloat(rawVal);
-                          }
-                          verified = details.status === "COMPLETED" || details.status === "APPROVED";
-                        } catch (capErr) {
-                          console.warn("Client capture fallback notice:", capErr);
-                        }
-                      }
-
-                      // 3. Credit user wallet balance in Supabase database
-                      if (user?.id && capturedAmount > 0) {
-                        // Tier A: Direct Supabase RPC
-                        const { error: rpcErr } = await supabase.rpc('add_funds_secure', {
-                          p_user_id: user.id,
-                          p_amount: capturedAmount,
-                        });
-
-                        if (rpcErr) {
-                          console.warn("RPC add_funds_secure notice:", rpcErr);
-
-                          // Tier B: Call Express API server /api/v1/wallet/deposit (service_role backend)
-                          try {
-                            const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-                            const apiKey = import.meta.env.VITE_API_KEY || '';
-                            await fetch(`${apiBase}/api/v1/wallet/deposit`, {
-                              method: 'POST',
-                              headers: {
-                                'Content-Type': 'application/json',
-                                'x-api-key': apiKey,
-                              },
-                              body: JSON.stringify({
-                                userId: user.id,
-                                amount: capturedAmount,
-                                referenceId: data.orderID,
-                                paymentMethod: 'PayPal',
-                              }),
-                            });
-                          } catch (apiErr) {
-                            console.warn("Express API deposit fallback notice:", apiErr);
-                          }
-                        }
-
-                        // Record deposit entry if deposits table exists
-                        try {
-                          await supabase.from("deposits").insert({
-                            user_id: user.id,
-                            amount: capturedAmount,
-                            payment_method: "PayPal",
-                            reference_id: data.orderID,
-                            status: "completed",
-                            created_at: new Date().toISOString(),
-                          });
-                        } catch {
-                          // Ignore missing deposits table
-                        }
-                      }
-
-                      // 4. Refresh wallet balance & dashboard state immediately
+                      const result = await verifyPayPalPayment(data.orderID);
+                      if (!result.verified || !result.amount) throw new Error('Wallet credit is pending. Retry verification with this order.');
                       await refreshWalletBalance();
                       await loadData();
-                      success('Funds added', `Successfully added $${capturedAmount.toFixed(2)} to your wallet.`);
+                      setPendingPayPalOrder(null);
+                      success('Funds added', `Successfully added $${result.amount.toFixed(2)} to your wallet.`);
                       setShowAddMoneyModal(false);
-                      setAddMoneyAmount('500');
-
                     } catch (err: unknown) {
-                      toastError('Deposit Error', getErrorMessage(err, 'Failed to process deposit.'));
+                      toastError('Deposit pending', getErrorMessage(err, 'Please retry payment verification; do not pay again.'));
                     } finally {
                       setAddMoneyLoading(false);
                     }
                   }}
+                  onError={() => toastError('PayPal unavailable', 'Payment was not confirmed. Please retry.')}
+
                 />
                 )}
               </div>

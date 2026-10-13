@@ -7,6 +7,8 @@ import { DashboardCard } from '../components/GlassCard';
 import type { AdminPurchasedCoupon, AdminUser, Company, CompanyStats, GiftCard, Settlement, AdminWithdrawal, SupportTicket, SupportMessage } from '../lib/supabase';
 import {
   adminApproveCompany,
+  adminSetAccountLocked,
+  adminGetAccountLocks,
   adminGenerateSettlements,
   adminGetPurchasedCoupons,
   adminGetSettlements,
@@ -502,13 +504,21 @@ export default function AdminDashboard() {
     }
   }
 
-  function toggleLockAccount(userId: string) {
-    setLockedAccounts((previous) => {
-      const nextState = !previous[userId];
-      success(nextState ? 'Account locked' : 'Account unlocked', 'Profile security status adjusted.');
-      return { ...previous, [userId]: nextState };
-    });
+  async function toggleLockAccount(userId: string) {
+    const nextState = !lockedAccounts[userId];
+    try {
+      await adminSetAccountLocked(userId, nextState);
+      setLockedAccounts(previous => ({ ...previous, [userId]: nextState }));
+      success(nextState ? 'Account locked' : 'Account unlocked', 'Account access has been updated on the server.');
+    } catch (err) { toastError('Account update failed', getErrorMessage(err, 'Could not update account access.')); }
   }
+
+  useEffect(() => {
+    let active = true;
+    void adminGetAccountLocks().then(locks => { if (active) setLockedAccounts(locks); })
+      .catch(() => { if (active) toastError('Account status unavailable', 'Refresh before changing account access.'); });
+    return () => { active = false; };
+  }, [toastError]);
 
   const handleDeleteOffer = async (id: string, title: string) => {
     if (!confirm(`Are you sure you want to completely remove the campaign "${title}" globally?`)) return;
