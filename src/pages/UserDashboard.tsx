@@ -1,3 +1,4 @@
+import { voucherState } from '../lib/voucherState';
 import { useNow } from '../hooks/useNow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -37,7 +38,7 @@ import {
 } from '../lib/supabase';
 import CountrySelector from '../components/CountrySelector';
 import type { CountryInfo } from '../lib/countries';
-import { getCountryByCode, getCountryBankConfig } from '../lib/countries';
+import { getCountryByCode, getCountryBankConfig, getPreferredGateway } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
@@ -136,7 +137,7 @@ export default function UserDashboard() {
   const [activityPage, setActivityPage] = useState(1);
   const [marketplacePage, setMarketplacePage] = useState(1);
   const [cardsPage, setCardsPage] = useState(1);
-  const [vouchersTab, setVouchersTab] = useState<'unused' | 'used'>('unused');
+  const [vouchersTab, setVouchersTab] = useState<'unused' | 'used' | 'inactive'>('unused');
   const ITEMS_PER_PAGE = 5;
   const CARDS_PER_PAGE = 6;
   const MARKETPLACE_PER_PAGE = 6;
@@ -165,12 +166,14 @@ export default function UserDashboard() {
 
 
 
+  const userId = user?.id;
+
   useEffect(() => {
-    if (!user?.id) return;
+    if (!userId) return;
 
     const syncWalletState = async () => {
       try {
-        const profile = await getUserProfileData(user.id);
+        const profile = await getUserProfileData(userId);
         setWalletBalance(profile.wallet_balance);
         if (profile.paypal_email) {
           setWithdrawForm(prev => ({ ...prev, paypalEmail: profile.paypal_email! }));
@@ -179,7 +182,7 @@ export default function UserDashboard() {
         if (profile.country_code) {
           setUserCountryCode(profile.country_code);
           setUserCurrency(getCountryByCode(profile.country_code).currency);
-          setSelectedGateway(getCountryByCode(profile.country_code).gatewayPriority.find(gateway => gateway !== 'paypal' || !['INR', 'AED'].includes(getCountryByCode(profile.country_code!).currency)) ?? 'stripe');
+          setSelectedGateway(getPreferredGateway(profile.country_code));
           setProfileCountry(getCountryByCode(profile.country_code));
         }
       } catch (err) {
@@ -188,7 +191,7 @@ export default function UserDashboard() {
     };
 
     void syncWalletState();
-  }, [user]);
+  }, [userId]);
 
   async function refreshWalletBalance() {
     if (!user?.id) return;
@@ -200,10 +203,11 @@ export default function UserDashboard() {
       }
     } catch (err: unknown) {
       console.warn("Could not fetch wallet balance:", err);
+      toastError("Wallet refresh failed", "The displayed balance may be out of date. Refresh before trying again.");
     }
   }
 
-  const userId = user?.id;
+
 
   const toastErrorRef = useRef(toastError);
   useEffect(() => { toastErrorRef.current = toastError; }, [toastError]);
@@ -706,10 +710,11 @@ export default function UserDashboard() {
     marketplacePage * MARKETPLACE_PER_PAGE
   );
 
-  const activeVouchersList = userVouchers.filter(v => v.status !== 'redeemed' && !v.is_used);
-  const redeemedVouchersList = userVouchers.filter(v => v.status === 'redeemed' || v.is_used);
+  const activeVouchersList = userVouchers.filter(v => voucherState(v, now) === 'active');
+  const inactiveVouchersList = userVouchers.filter(v => voucherState(v, now) === 'unavailable');
+  const redeemedVouchersList = userVouchers.filter(v => voucherState(v, now) === 'used');
 
-  const selectedCardsList = vouchersTab === 'unused' ? activeVouchersList : redeemedVouchersList;
+  const selectedCardsList = vouchersTab === 'unused' ? activeVouchersList : vouchersTab === 'inactive' ? inactiveVouchersList : redeemedVouchersList;
   const totalCardsPages = Math.ceil(selectedCardsList.length / CARDS_PER_PAGE);
   const slicedCards = selectedCardsList.slice(
     (cardsPage - 1) * CARDS_PER_PAGE,
@@ -1271,6 +1276,7 @@ export default function UserDashboard() {
                             });
                             setUserCountryCode(profileCountry.code);
                             setUserCurrency(profileCountry.currency);
+                            setSelectedGateway(getPreferredGateway(profileCountry.code));
                             success('Profile updated', `Country set to ${profileCountry.name}. Currency: ${profileCountry.currency}`);
                           } catch (err) {
                             toastError('Update failed', err instanceof Error ? err.message : 'Could not update profile.');
@@ -1441,6 +1447,8 @@ export default function UserDashboard() {
                 >
                   Used ({usedVoucherCount})
                 </button>
+                <button className={`btn btn-sm ${vouchersTab === 'inactive' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => { setVouchersTab('inactive'); setCardsPage(1); }}>Unavailable ({inactiveVouchersList.length})</button>
               </div>
 
               {vouchersTab === 'unused' ? (
@@ -1532,7 +1540,7 @@ export default function UserDashboard() {
                                 </button>
                               </div>
                             </div>
-                            <span className="badge badge-gray">{voucher.is_used || voucher.status === 'redeemed' ? 'USED' : voucher.status}</span>
+                            <span className="badge badge-gray">{voucherState(voucher, now) === 'used' ? 'USED' : 'UNAVAILABLE'}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
                             <div>
@@ -1551,7 +1559,7 @@ export default function UserDashboard() {
                     <div className="glass-card-strong empty-state" style={{ padding: '1.5rem' }}>
                       <div className="empty-state__icon" style={{ width: 44, height: 44 }}><CreditCard size={20} /></div>
                       <div>
-                        <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.9rem' }}>No used/redeemed vouchers in this page.</p>
+                        <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.9rem' }}>No {vouchersTab === 'inactive' ? 'unavailable' : 'used/redeemed'} vouchers on this page.</p>
                       </div>
                     </div>
                   )}
@@ -2001,6 +2009,7 @@ export default function UserDashboard() {
                     key={val}
                     type="button"
                     className="btn btn-secondary btn-sm"
+                    disabled={!!stripeResumeOrder || addMoneyLoading}
                     onClick={() => setAddMoneyAmount(val)}
                     style={{
                       background: addMoneyAmount === val ? 'var(--primary-muted)' : 'var(--surface-soft)',
@@ -2019,7 +2028,7 @@ export default function UserDashboard() {
               <PaymentMethodSelector
                 selected={selectedGateway}
                 onSelect={setSelectedGateway}
-                disabled={addMoneyLoading}
+                disabled={!!stripeResumeOrder || addMoneyLoading}
                 countryCode={userCountryCode}
                 userCurrency={userCurrency}
               />

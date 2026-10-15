@@ -35,7 +35,7 @@ export default function SupportWidget() {
   // Don't render for admins or unauthenticated
   if (!user || isAdmin) return null;
 
-  return <SupportWidgetInner user={user} />;
+  return <SupportWidgetInner key={user.id} user={user} />;
 }
 
 function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) {
@@ -47,6 +47,11 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [ticketError, setTicketError] = useState('');
+  const [threadError, setThreadError] = useState('');
+  const [replyError, setReplyError] = useState('');
+  const threadRevision = useRef(0);
+  const submission = useRef<{ id: string; payload: string } | null>(null);
 
   // Drag and drop state
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
@@ -163,27 +168,33 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
 
   async function loadTickets() {
     setLoadingTickets(true);
+    setTicketError('');
     try {
       const data = await getUserSupportTickets(user.id);
       setTickets(data);
     } catch {
-      /* silent */
+      setTicketError('Could not load tickets. Please retry.');
     } finally {
       setLoadingTickets(false);
     }
   }
 
   async function openThread(ticket: SupportTicket) {
+    const revision = ++threadRevision.current;
     setSelectedTicket(ticket);
     setView('thread');
+    setMessages([]);
+    setReply('');
+    setReplyError('');
+    setThreadError('');
     setLoadingMessages(true);
     try {
       const msgs = await getSupportTicketMessages(ticket.id);
-      setMessages(msgs);
+      if (revision === threadRevision.current) setMessages(msgs);
     } catch {
-      /* silent */
+      if (revision === threadRevision.current) setThreadError('Could not load this conversation. Please retry.');
     } finally {
-      setLoadingMessages(false);
+      if (revision === threadRevision.current) setLoadingMessages(false);
     }
   }
 
@@ -196,7 +207,10 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
     }
     setSending(true);
     try {
-      await createSupportTicket(user.id, user.email || '', subject.trim(), firstMessage.trim());
+      const payload = JSON.stringify([subject.trim(), firstMessage.trim()]);
+      if (!submission.current || submission.current.payload !== payload) submission.current = { id: crypto.randomUUID(), payload };
+      await createSupportTicket(subject.trim(), firstMessage.trim(), submission.current.id);
+      submission.current = null;
       setSubmitted(true);
       setSubject('');
       setFirstMessage('');
@@ -209,18 +223,24 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
 
   async function handleSendReply(e: React.FormEvent) {
     e.preventDefault();
-    if (!reply.trim() || !selectedTicket) return;
+    if (!reply.trim() || !selectedTicket || loadingMessages || threadError || sending) return;
+    const revision = threadRevision.current;
+    const ticketId = selectedTicket.id;
+    setReplyError('');
     setSending(true);
+    let sent = false;
     try {
-      await sendSupportMessage(selectedTicket.id, user.id, reply.trim(), false);
-      setReply('');
-      const msgs = await getSupportTicketMessages(selectedTicket.id);
-      setMessages(msgs);
+      await sendSupportMessage(ticketId, user.id, reply.trim(), false);
+      sent = true;
+      if (revision === threadRevision.current) setReply('');
+      const msgs = await getSupportTicketMessages(ticketId);
+      if (revision === threadRevision.current) setMessages(msgs);
     } catch {
-      /* silent */
-    } finally {
-      setSending(false);
-    }
+      if (revision === threadRevision.current) {
+        if (sent) setThreadError('Reply sent, but the conversation could not refresh. Reload to see it.');
+        else setReplyError('Reply could not be sent. Your text is preserved; please retry.');
+      }
+    } finally { setSending(false); }
   }
 
   function handleOpen() {
@@ -450,9 +470,10 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
               ) : (
                 <form onSubmit={handleCreateTicket} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                   <div>
-                    <label style={labelStyle}>Subject *</label>
+                    <label htmlFor="support-subject-input" style={labelStyle}>Subject *</label>
                     <input
                       id="support-subject-input"
+                      maxLength={200}
                       style={inputStyle}
                       value={subject}
                       onChange={e => setSubject(e.target.value)}
@@ -461,9 +482,10 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
                     />
                   </div>
                   <div>
-                    <label style={labelStyle}>Describe your issue *</label>
+                    <label htmlFor="support-message-input" style={labelStyle}>Describe your issue *</label>
                     <textarea
                       id="support-message-input"
+                      maxLength={10000}
                       style={{ ...inputStyle, minHeight: '110px', resize: 'vertical' }}
                       value={firstMessage}
                       onChange={e => setFirstMessage(e.target.value)}
@@ -494,7 +516,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
                 <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem 0' }}>
                   <div className="spinner" />
                 </div>
-              ) : tickets.length === 0 ? (
+              ) : ticketError ? (<div role="alert">{ticketError} <button onClick={() => void loadTickets()}>Retry</button></div>) : tickets.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '1.5rem 0', color: 'rgba(255,255,255,0.4)' }}>
                   <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📭</div>
                   <div style={{ fontSize: '0.9rem' }}>No tickets yet.</div>
@@ -550,6 +572,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
               )
             )}
 
+            {replyError && view === 'thread' && <p role="alert">{replyError}</p>}
             {/* THREAD VIEW */}
             {view === 'thread' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
@@ -557,7 +580,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
                   <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem 0' }}>
                     <div className="spinner" />
                   </div>
-                ) : (
+                ) : threadError ? (<div role="alert">{threadError} <button onClick={() => selectedTicket && void openThread(selectedTicket)}>Reload conversation</button></div>) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
                     {messages.map(msg => (
                       <div
@@ -608,7 +631,7 @@ function SupportWidgetInner({ user }: { user: { id: string; email?: string } }) 
                     <button
                       id="support-reply-send-btn"
                       type="submit"
-                      disabled={sending || !reply.trim()}
+                      disabled={sending || loadingMessages || !!threadError || !reply.trim()}
                       style={{
                         background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
                         border: 'none',

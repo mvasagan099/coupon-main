@@ -10,6 +10,8 @@ interface AuthContextType {
   isMerchant: boolean;
   isLoading: boolean;
   authError: string | null;
+  isPasswordRecovery: boolean;
+  finishPasswordRecovery: () => void;
   signOut: () => Promise<void>;
 }
 async function timed<T>(operation: PromiseLike<T>): Promise<T> {
@@ -21,7 +23,7 @@ async function timed<T>(operation: PromiseLike<T>): Promise<T> {
   } finally { clearTimeout(timer!); }
 }
 const AuthContext = createContext<AuthContextType>({ user: null, session: null, isAdmin: false,
-  isMerchant: false, isLoading: true, authError: null, signOut: async () => {} });
+  isMerchant: false, isLoading: true, authError: null, isPasswordRecovery: false, finishPasswordRecovery: () => {}, signOut: async () => {} });
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -30,14 +32,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isMerchant, setIsMerchant] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
   useEffect(() => {
     let disposed = false;
     let revision = 0;
+    let verifiedUserId: string | null = null;
+    let verifiedMerchant = false;
     let timer: ReturnType<typeof setTimeout>;
     const applySession = async (candidate: Session | null, current: number) => {
       try {
         if (!candidate || !isSupabaseConfigured) {
-          if (!disposed && current === revision) { setUser(null); setSession(null); setIsMerchant(false); setAuthError(null); }
+          if (!disposed && current === revision) { verifiedUserId = null; verifiedMerchant = false; setIsPasswordRecovery(false); setUser(null); setSession(null); setIsMerchant(false); setAuthError(null); }
           return;
         }
         const { data, error } = await timed(supabase.auth.getUser(candidate.access_token));
@@ -46,12 +51,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (lockError) throw new Error('Account access could not be verified. Please retry.');
         if (!active) throw new Error('This account is locked. Contact support.');
         await timed(ensureUserProfile(data.user.id));
-        const company = await timed(getCompanyByOwner(data.user.id));
+        let merchant = verifiedUserId === data.user.id && verifiedMerchant;
+        try { merchant = !!(await timed(getCompanyByOwner(data.user.id))); }
+        catch (error) { console.warn('Merchant profile could not be loaded:', error); }
         if (!disposed && current === revision) {
-          setUser(data.user); setSession(candidate); setIsMerchant(!!company); setAuthError(null);
+          verifiedUserId = data.user.id; verifiedMerchant = merchant;
+          setUser(data.user); setSession(candidate); setIsMerchant(merchant); setAuthError(null);
         }
       } catch (error) {
         if (!disposed && current === revision) {
+          verifiedUserId = null; verifiedMerchant = false;
           setUser(null); setSession(null); setIsMerchant(false);
           setAuthError(error instanceof Error ? error.message : 'Session verification failed.');
         }
@@ -61,12 +70,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const schedule = (candidate: Session | null) => {
       const current = ++revision;
-      setIsLoading(true);
+      if (!candidate || candidate.user.id !== verifiedUserId) setIsLoading(true);
       clearTimeout(timer);
       // Leave the auth callback before making any asynchronous Supabase calls.
       timer = setTimeout(() => { void applySession(candidate, current); }, 0);
     };
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, candidate) => schedule(candidate));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, candidate) => {
+      if (event === 'PASSWORD_RECOVERY') setIsPasswordRecovery(true);
+      schedule(candidate);
+    });
     void supabase.auth.getSession().then(({ data }) => {
       if (!revision) schedule(data.session);
     }).catch(() => schedule(null));
@@ -79,5 +91,5 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null); setSession(null); setIsMerchant(false); setAuthError(null);
   };
   return <AuthContext.Provider value={{ user, session, isAdmin: user?.app_metadata?.role === 'admin',
-    isMerchant, isLoading, authError, signOut }}>{children}</AuthContext.Provider>;
+    isMerchant, isLoading, authError, isPasswordRecovery, finishPasswordRecovery: () => setIsPasswordRecovery(false), signOut }}>{children}</AuthContext.Provider>;
 }

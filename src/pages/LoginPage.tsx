@@ -355,6 +355,8 @@ export function LoginPage() {
               </div>
             </div>
 
+            {!isSignUp && <Link to="/reset-password">Forgot password?</Link>}
+
             {/* Country selector — shown only in sign-up mode for users */}
             {isSignUp && (
               <div>

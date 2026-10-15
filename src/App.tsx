@@ -8,6 +8,7 @@ import { LoadingPage } from './components/LoadingPage';
 import Layout from './components/Layout';
 import SupportWidget from './components/SupportWidget';
 
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
@@ -78,6 +79,7 @@ function App() {
                 <Route path="/" element={<Layout />}>
                   <Route index element={<LandingPage />} />
                   <Route path="login" element={<LoginPage />} />
+                  <Route path="reset-password" element={<ResetPasswordPage />} />
                   <Route path="userlogin" element={<LoginPage />} />
                   <Route path="companylogin" element={<LoginPage />} />
                   <Route path="adminlogin" element={<LoginPage />} />

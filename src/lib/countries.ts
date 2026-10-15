@@ -66,6 +66,12 @@ export function getGatewaysForCountry(countryCode: string): PaymentGateway[] {
   return getCountryByCode(countryCode).gatewayPriority;
 }
 
+/** Preferred provider that supports the country's nominal wallet currency. */
+export function getPreferredGateway(countryCode: string): PaymentGateway {
+  const country = getCountryByCode(countryCode);
+  return country.gatewayPriority.find(gateway => gateway !== 'paypal' || !['INR', 'AED'].includes(country.currency)) ?? 'stripe';
+}
+
 /** ISO 4217 currency code for a country. */
 export function getCurrencyForCountry(countryCode: string): string {
   return getCountryByCode(countryCode).currency;

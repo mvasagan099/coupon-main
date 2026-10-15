@@ -259,6 +259,10 @@ export async function getCompanyByOwner(ownerId: string): Promise<Company | null
       supabase
         .rpc("get_companies")
         .eq("owner_id", ownerId)
+        .order("status", { ascending: true })
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .limit(1)
         .maybeSingle(),
       8000
     );
@@ -578,28 +582,7 @@ export async function getUserOrders(userId: string) {
     );
     if (error) throw error;
     
-    const dbOrders = data ?? [];
-
-    const ordersRaw = getLocal<Order[]>("cv_orders", []);
-    const companies = getLocal<Company[]>("cv_companies", []);
-    const coupons = getLocal<Coupon[]>("cv_coupons", []);
-    const userLocalOrders = ordersRaw.filter(o => o.user_id === userId && o.status === "paid");
-    
-    const dbIds = new Set(dbOrders.map((o: any) => o.id));
-    
-    const uniqueLocalOrders = userLocalOrders
-      .filter(o => !dbIds.has(o.id))
-      .map(o => {
-        const co = companies.find(comp => comp.id === o.company_id);
-        const cp = coupons.find(coup => coup.id === o.coupon_id);
-        return {
-          ...o,
-          company: co ? { name: co.name, prefix: co.prefix } : { name: "Unknown", prefix: "MCH" },
-          coupon: cp ? { code: cp.code, is_used: cp.is_used, remaining_balance: cp.remaining_balance, status: cp.status } : null
-        };
-      });
-
-    return [...uniqueLocalOrders, ...dbOrders].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return data ?? [];
   } catch (err: any) {
     if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getUserOrders failed, falling back to LocalStorage:", err.message);
@@ -638,23 +621,7 @@ export async function getUserGiftCards(userId: string): Promise<Coupon[]> {
       company_name: d.companies?.name
     }));
 
-    // Merge with LocalStorage in case some purchases fell back due to RPC failures
-    const localCouponsRaw = getLocal<Coupon[]>("cv_coupons", []);
-    const localCompanies = getLocal<Company[]>("cv_companies", []);
-    const userLocalCoupons = localCouponsRaw.filter(c => c.issued_to === userId);
-    
-    const dbIds = new Set(dbCoupons.map(c => c.id));
-    const uniqueLocalCoupons = userLocalCoupons
-      .filter(c => !dbIds.has(c.id))
-      .map(c => {
-        const co = localCompanies.find(comp => comp.id === c.company_id);
-        return {
-          ...c,
-          company_name: co ? co.name : "Unknown Brand"
-        };
-      });
-
-    return [...uniqueLocalCoupons, ...dbCoupons].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return dbCoupons;
   } catch (err: any) {
     if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getUserGiftCards failed, falling back to LocalStorage:", err.message);
@@ -780,12 +747,14 @@ export async function markCouponUsedById(id: string): Promise<string> {
 
 export async function getRedemptionTransactions(couponId?: string, companyId?: string): Promise<RedemptionTransaction[]> {
   try {
+    if (isSupabaseConfigured && hasTimedOut) throw new Error("Database unavailable. Please retry.");
     let dbList: (RedemptionTransaction & { company_id?: string })[] = [];
     if (isSupabaseConfigured && !hasTimedOut) {
       // Attempt standard read
       const query = supabase.from("redemptions").select("*, coupons(code, company_id, companies(name))");
       const { data, error } = await withTimeout(query.order("created_at", { ascending: false }), 8000);
-      if (!error && data) {
+      if (error) throw error;
+      if (data) {
         dbList = data.map(d => ({
           id: d.id,
           coupon_id: d.coupon_id,
@@ -797,6 +766,10 @@ export async function getRedemptionTransactions(couponId?: string, companyId?: s
           created_at: d.created_at
         }));
       }
+    }
+
+    if (isSupabaseConfigured) {
+      return dbList.filter(row => (!couponId || row.coupon_id === couponId) && (!companyId || row.company_id === companyId));
     }
 
     // Get local redemptions
@@ -1346,18 +1319,7 @@ export async function adminGetSettlements(): Promise<Settlement[]> {
         .order('created_at', { ascending: false })
     );
     if (error) throw error;
-    
-    // Merge with LocalStorage
-    const localSettlements = getLocal<Settlement[]>("cv_settlements", []);
-    const companies = getLocal<Company[]>("cv_companies", []);
-    
-    const dbIds = new Set((data ?? []).map(s => s.id));
-    const uniqueLocal = localSettlements.filter(s => !dbIds.has(s.id)).map(s => {
-      const co = companies.find(c => c.id === s.company_id);
-      return { ...s, company: co ? { name: co.name, prefix: co.prefix } : undefined };
-    });
-    
-    return [...uniqueLocal, ...(data ?? [])] as Settlement[];
+    return (data ?? []) as Settlement[];
   } catch (err: any) {
     if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] adminGetSettlements fallback:", err.message);
@@ -1382,17 +1344,7 @@ export async function merchantGetSettlements(companyId: string): Promise<Settlem
         .order('period_month', { ascending: false })
     );
     if (error) throw error;
-    
-    const localSettlements = getLocal<Settlement[]>("cv_settlements", []).filter(s => s.company_id === companyId);
-    const companies = getLocal<Company[]>("cv_companies", []);
-    
-    const dbIds = new Set((data ?? []).map(s => s.id));
-    const uniqueLocal = localSettlements.filter(s => !dbIds.has(s.id)).map(s => {
-      const co = companies.find(c => c.id === s.company_id);
-      return { ...s, company: co ? { name: co.name, prefix: co.prefix } : undefined };
-    });
-    
-    return [...uniqueLocal, ...(data ?? [])] as Settlement[];
+    return (data ?? []) as Settlement[];
   } catch (err: any) {
     if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] merchantGetSettlements fallback:", err.message);
@@ -1407,14 +1359,7 @@ export async function merchantGetSettlements(companyId: string): Promise<Settlem
 }
 
 export async function adminMarkSettlementPaid(settlementId: string): Promise<void> {
-  const { error } = await supabase
-    .from('settlements')
-    .update({ 
-      status: 'paid',
-      paid_at: new Date().toISOString()
-    })
-    .eq('id', settlementId);
-    
+  const { error } = await withTimeout(supabase.rpc('admin_mark_settlement_paid', { p_settlement_id: settlementId }));
   if (error) throw error;
 }
 
@@ -1512,33 +1457,15 @@ export interface SupportMessage {
 
 /** Customer creates a new support ticket (first message included) */
 export async function createSupportTicket(
-  userId: string,
-  userEmail: string,
   subject: string,
-  firstMessage: string
+  firstMessage: string,
+  requestId: string
 ): Promise<SupportTicket> {
-  const { data: ticket, error: ticketError } = await withTimeout(
-    supabase
-      .from('support_tickets')
-      .insert({ user_id: userId, user_email: userEmail, subject })
-      .select()
-      .single(),
-    8000
-  );
-  if (ticketError) throw ticketError;
-
-  const { error: msgError } = await withTimeout(
-    supabase.from('support_messages').insert({
-      ticket_id: ticket.id,
-      sender_id: userId,
-      message: firstMessage,
-      is_admin: false,
-    }),
-    8000
-  );
-  if (msgError) throw msgError;
-
-  return ticket as SupportTicket;
+  const { data, error } = await withTimeout(supabase.rpc('create_support_ticket', {
+    p_subject: subject, p_message: firstMessage, p_request_id: requestId,
+  }), 8000);
+  if (error) throw error;
+  return data as SupportTicket;
 }
 
 /** Customer: get own tickets */

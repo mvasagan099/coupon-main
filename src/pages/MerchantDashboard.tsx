@@ -138,7 +138,7 @@ export default function MerchantDashboard() {
         setMetrics({
           totalSales: totalRedeemedValue,
           couponsRedeemed: transactions.length,
-          activeOffers: cards.length,
+          activeOffers: cards.filter(card => card.is_active && new Date(card.expiry_date).getTime() > Date.now()).length,
           liabilities: cards.reduce((acc, card) => acc + card.value, 0) - totalRedeemedValue,
         });
       } else {
@@ -934,9 +934,9 @@ export default function MerchantDashboard() {
                       </div>
                       <div>
                         <label className="label">KYC document</label>
-                        <input className="input" type="file" accept="application/pdf,image/jpeg,image/png" required
+                        <input className="input" type="file" accept="application/pdf,image/jpeg,image/png" required={!kycFile}
                           onChange={(event) => { setKycFile(event.target.files?.[0] ?? null); setUploadedDocument(null); }} />
-                        <p className="text-sm">Private PDF, JPG or PNG, up to 5 MB. Only you and authorized administrators can access it.</p>
+                        <p className="text-sm">{kycFile && <>Selected: {kycFile.name}. </>}Private PDF, JPG or PNG, up to 5 MB. Only you and authorized administrators can access it.</p>
                       </div>
                     </div>
                   )}
