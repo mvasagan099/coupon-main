@@ -109,7 +109,7 @@ export function Layout({ children }: LayoutProps = {}) {
           <div className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[var(--surface)]/92 border-t border-[var(--border)] px-4 py-2.5 flex justify-around items-center shadow-[0_-8px_30px_rgb(0,0,0,0.06)] backdrop-blur-xl">
             {customerLinks.map((link, index) => {
               const isActive = index === 0
-                ? location.pathname === link.path
+                ? (location.pathname === link.path || location.pathname.startsWith(`${link.path}/`))
                 : location.pathname.startsWith(link.path);
               return (
                 <Link

@@ -134,3 +134,46 @@ test('multiple merchant companies select one deterministic company instead of fa
     supabase: { rpc: () => q }, withTimeout: async p => await p })('owner');
   assert.equal(limit, 1); assert.equal(company.id, 'approved-company');
 });
+function brandCatalogue() { return compile(fs.readFileSync(path.join(root, 'src/lib/brandCatalog.ts'), 'utf8'), {}); }
+test('15 distinct famous-brand previews contain no invented coupon inventory', () => {
+  const { CATALOGUE_BRANDS, getCatalogueBrand } = brandCatalogue();
+  assert.equal(CATALOGUE_BRANDS.length, 15); assert.equal(new Set(CATALOGUE_BRANDS.map(brand => brand.slug)).size, 15);
+  for (const name of ['amazon', 'flipkart', 'meesho', 'facebook']) assert.ok(getCatalogueBrand(name));
+  assert.equal(getCatalogueBrand('unknown'), undefined);
+  for (const brand of CATALOGUE_BRANDS) { assert.ok(brand.description); assert.equal('price' in brand, false); assert.equal('expiry_date' in brand, false); }
+});
+test('brand discovery uses issuer identity rather than unrelated coupon titles', () => {
+  const { getCatalogueBrand, getBrandOffers } = brandCatalogue();
+  const matches = getBrandOffers(getCatalogueBrand('amazon'), [{ id: 'real', company_name: ' Amazon ' }, { id: 'unrelated', company_name: 'Another merchant', title: 'Amazon-themed offer' }]);
+  assert.equal(matches.length, 1); assert.equal(matches[0].id, 'real');
+});
+test('details purchase eligibility fails closed for wrong country, expiry, unpublished and sold-out offers', () => {
+  const { getOfferUnavailableReason } = brandCatalogue();
+  const now = Date.parse('2026-10-15T12:00:00Z');
+  const offer = { id: 'live', country_code: 'IN', is_active: true, price: 500, value: 600, created_at: '2026-10-01T12:00:00Z', expiry_date: '2027-01-01', issue_limit: 10, issued_count: 9 };
+  assert.equal(getOfferUnavailableReason(offer, 'IN', now), null);
+  assert.match(getOfferUnavailableReason(offer, null, now), /account country/);
+  assert.match(getOfferUnavailableReason(offer, 'US', now), /selected country/);
+  for (const changes of [{ is_active: false }, { expiry_date: '2026-01-01' }, { expiry_date: 'invalid' }, { created_at: '2027-01-01' }, { issued_count: 10 }, { issue_limit: 0 }, { price: NaN }]) assert.ok(getOfferUnavailableReason({ ...offer, ...changes }, 'IN', now));
+});
+test('purchase confirmation prevents double submission and never purchases a brand preview', async () => {
+  let resolvePayment, calls = 0, navigated = false;
+  const ctx = { offer: undefined, user: { id: 'qa', email: 'qa@example.invalid' }, canBuy: false, purchasing: { current: false }, setBusy() {}, setPurchaseError() {},
+    purchaseGiftCard: () => { calls++; return new Promise(resolve => { resolvePayment = resolve; }); }, dialog: { current: { close() {} } }, success() {},
+    navigate: path => { navigated = path === '/dashboard/cards'; }, messageOf: error => error.message };
+  const confirm = nestedFunction('src/pages/MarketplaceDetailsPage.tsx', 'confirmPurchase', ctx);
+  await confirm(); assert.equal(calls, 0);
+  ctx.offer = { id: 'published-offer', price: 500 }; ctx.canBuy = true;
+  const first = confirm(); await confirm(); assert.equal(calls, 1); resolvePayment({}); await first; assert.equal(navigated, true);
+});
+test('brand catalogue renders 15 links and no home-page purchase controls', () => {
+  const React = require('react'); const { renderToStaticMarkup } = require('react-dom/server'); const { MemoryRouter } = require('react-router-dom');
+  const exports = compile(fs.readFileSync(path.join(root, 'src/components/BrandCatalogue.tsx'), 'utf8'), {
+    require: name => name.includes('brandCatalog') ? brandCatalogue() : name.endsWith('.css') ? {} : require(name),
+  });
+  const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: '' })));
+  assert.equal((html.match(/aria-label="View .*? coupon details"/g) || []).length, 15);
+  assert.equal(html.includes('<button'), false); assert.equal(html.includes('Buy coupon'), false);
+  const filtered = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: 'Meesho' })));
+  assert.equal((filtered.match(/aria-label="View .*? coupon details"/g) || []).length, 1);
+});

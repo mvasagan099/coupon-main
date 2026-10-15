@@ -9,6 +9,7 @@ import Layout from './components/Layout';
 import SupportWidget from './components/SupportWidget';
 
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
+const MarketplaceDetailsPage = lazy(() => import('./pages/MarketplaceDetailsPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
@@ -88,6 +89,8 @@ function App() {
                     path="dashboard"
                     element={<Navigate to="/dashboard/marketplace" replace />}
                   />
+                  <Route path="dashboard/marketplace/brand/:brandSlug" element={<ProtectedRoute><MarketplaceDetailsPage /></ProtectedRoute>} />
+                  <Route path="dashboard/marketplace/coupon/:offerId" element={<ProtectedRoute><MarketplaceDetailsPage /></ProtectedRoute>} />
                   <Route
                     path="dashboard/:section"
                     element={

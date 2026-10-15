@@ -81,7 +81,7 @@ export default function TopNav({ portal }: TopNavProps) {
       {signOutError && <span role="alert">{signOutError}</span>}
       {links.map((link, index) => {
         const isActive = index === 0
-          ? location.pathname === link.path
+          ? (location.pathname === link.path || location.pathname.startsWith(`${link.path}/`))
           : location.pathname.startsWith(link.path);
 
         return (
