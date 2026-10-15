@@ -4,12 +4,11 @@ import { useNow } from '../hooks/useNow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
-import { LoadingPage } from '../components/LoadingPage';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import PaymentMethodSelector from '../components/PaymentMethodSelector';
 import type { PaymentGateway } from '../lib/paymentGateway';
@@ -78,10 +77,8 @@ export default function UserDashboard() {
   const [userVouchers, setUserVouchers] = useState<Coupon[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [redemptions, setRedemptions] = useState<RedemptionTransaction[]>([]);
-  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [catalogSearch, setCatalogSearch] = useState('');
-  const [priceFilter, setPriceFilter] = useState('All');
 
   const [walletBalance, setWalletBalance] = useState(0);
 
@@ -135,12 +132,10 @@ export default function UserDashboard() {
   const [depositPage, setDepositPage] = useState(1);
   const [withdrawPage, setWithdrawPage] = useState(1);
   const [activityPage, setActivityPage] = useState(1);
-  const [marketplacePage, setMarketplacePage] = useState(1);
   const [cardsPage, setCardsPage] = useState(1);
   const [vouchersTab, setVouchersTab] = useState<'unused' | 'used' | 'inactive'>('unused');
   const ITEMS_PER_PAGE = 5;
   const CARDS_PER_PAGE = 6;
-  const MARKETPLACE_PER_PAGE = 6;
 
   // Country / currency state
   const [userCountryCode, setUserCountryCode] = useState<string | null>(null);
@@ -211,12 +206,10 @@ export default function UserDashboard() {
 
   const loadData = useCallback(async () => {
     if (!userId) {
-      setLoading(false);
       return;
     }
 
     try {
-      setLoading(true);
       setLoadError(null);
 
       // Race the data loading against a 12-second timeout
@@ -248,8 +241,6 @@ export default function UserDashboard() {
       const msg = getErrorMessage(err, 'Failed to load dashboard details.');
       toastErrorRef.current('Load error', msg);
       setLoadError(msg);
-    } finally {
-      setLoading(false);
     }
   }, [userId]);
 
@@ -619,22 +610,6 @@ export default function UserDashboard() {
     return list.sort((a, b) => b.date.localeCompare(a.date));
   }, [orders, redemptions, deposits, withdrawals, userCurrency]);
 
-  const filteredCatalog = useMemo(() => {
-    return giftCards.filter((card) => {
-      const matchesSearch =
-        card.title.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        (card.company_name && card.company_name.toLowerCase().includes(catalogSearch.toLowerCase()));
-
-      let matchesPrice = true;
-      if (priceFilter === 'low') matchesPrice = card.price < 500;
-      else if (priceFilter === 'mid') matchesPrice = card.price >= 500 && card.price <= 2000;
-      else if (priceFilter === 'high') matchesPrice = card.price > 2000;
-
-      return !!userCountryCode && card.country_code === userCountryCode && card.is_active !== false &&
-        (!card.expiry_date || new Date(card.expiry_date).getTime() > now) && matchesSearch && matchesPrice;
-    });
-  }, [catalogSearch, giftCards, priceFilter, userCountryCode, now]);
-
   const totalDepositPages = Math.ceil(deposits.length / ITEMS_PER_PAGE);
   const slicedDeposits = deposits.slice(
     (depositPage - 1) * ITEMS_PER_PAGE,
@@ -651,12 +626,6 @@ export default function UserDashboard() {
   const slicedActivity = combinedTransactions.slice(
     (activityPage - 1) * ITEMS_PER_PAGE,
     activityPage * ITEMS_PER_PAGE
-  );
-
-  const totalMarketplacePages = Math.ceil(filteredCatalog.length / MARKETPLACE_PER_PAGE);
-  const slicedMarketplace = filteredCatalog.slice(
-    (marketplacePage - 1) * MARKETPLACE_PER_PAGE,
-    marketplacePage * MARKETPLACE_PER_PAGE
   );
 
   const activeVouchersList = userVouchers.filter(v => voucherState(v, now) === 'active');
@@ -710,150 +679,15 @@ export default function UserDashboard() {
               <input
                 className="input"
                 style={{ width: '100%', borderRadius: '99px', padding: '0.8rem 1.25rem 0.8rem 2.8rem', background: 'var(--surface-soft)' }}
-                aria-label="Search brands and coupons"
-                placeholder="Search brand or card..."
+                aria-label="Search brands"
+                placeholder="Search brands..."
                 value={catalogSearch}
-                onChange={(event) => { setCatalogSearch(event.target.value); setMarketplacePage(1); }}
+                onChange={(event) => setCatalogSearch(event.target.value)}
               />
             </div>
-            <select aria-label="Filter coupon prices" className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => { setPriceFilter(event.target.value); setMarketplacePage(1); }}>
-              <option value="All">All prices</option>
-              <option value="low">Under 500</option>
-              <option value="mid">500 - 2000</option>
-              <option value="high">Over 2000</option>
-            </select>
           </div>
 
-          <BrandCatalogue search={catalogSearch} visible={priceFilter === 'All'} />
-          <div className="catalogue-section-heading"><div><span className="section-label">AVAILABLE COUPONS</span><h2>Offers for your country</h2><p>Open a coupon to review its company, launch date, expiry and price.</p></div></div>
-          {loading ? (
-            <LoadingPage message="Loading marketplace..." />
-          ) : loadError ? (
-            <div className="glass-card-strong empty-state">
-              <div className="empty-state__icon">
-                <ShieldCheck size={28} />
-              </div>
-              <div>
-                <h3 style={{ margin: '0 0 0.35rem', color: 'var(--text-1)', fontSize: '1.15rem', fontWeight: 600 }}>Something went wrong</h3>
-                <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.9rem', maxWidth: '360px' }}>{loadError}</p>
-              </div>
-              <button className="btn btn-primary" onClick={() => loadData()} style={{ marginTop: '0.25rem' }}>
-                Try again
-              </button>
-            </div>
-          ) : filteredCatalog.length === 0 ? (
-            <div className="glass-card-strong empty-state">
-              <div className="empty-state__icon">
-                <SearchX size={28} />
-              </div>
-              <div>
-                <h3 style={{ margin: '0 0 0.35rem', color: 'var(--text-1)', fontSize: '1.15rem', fontWeight: 600 }}>No published coupons found</h3>
-                <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.9rem', maxWidth: '320px' }}>We couldn't find any active gift cards matching your search right now.</p>
-              </div>
-              <button className="btn btn-secondary" onClick={() => { setCatalogSearch(''); setPriceFilter('All'); }} style={{ marginTop: '0.25rem' }}>
-                Clear search filters
-              </button>
-            </div>
-          ) : (
-            <div>
-              <div className="responsive-grid-3 stagger-fade">
-                {slicedMarketplace.map((card) => {
-                  const val = card.value ?? 0;
-                  const prc = card.price ?? 0;
-                  const savings = val - prc;
-                  const savingsPct = val > 0 ? Math.round((savings / val) * 100) : 0;
-
-                  return (
-                    <Link to={`/dashboard/marketplace/coupon/${card.id}`} key={card.id} aria-label={`View ${card.title} details`} className="card card-hover card-lift marketplace-card offer-listing-link" style={{ padding: '1rem', position: 'relative' }}>
-                      <div className="img-zoom"
-                        style={{
-                          minHeight: '220px',
-                          borderRadius: '24px',
-                          padding: '1.2rem',
-                          color: '#fff',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                          position: 'relative',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <div
-                          className="marketplace-card-img"
-                          style={{
-                            position: 'absolute',
-                            inset: 0,
-                            background: `url(${(!card.banner_image || card.banner_image.includes('localhost') || card.banner_image.includes('127.0.0.1')) ? 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60' : card.banner_image}) center/cover`,
-                            zIndex: 0
-                          }}
-                        />
-                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, rgba(25,28,29,0.55), rgba(25,28,29,0.85))', zIndex: 1 }} />
-                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 50%)', pointerEvents: 'none', borderRadius: '24px', zIndex: 2 }} />
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', position: 'relative', zIndex: 3 }}>
-                          <span className="badge" style={{ background: 'rgba(128,249,200,0.2)', color: '#fff', backdropFilter: 'blur(8px)' }}>
-                            Save {savingsPct}%
-                          </span>
-                        </div>
-                        <div style={{ position: 'relative', zIndex: 3 }}>
-                          <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
-                          <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <Zap size={14} /> {formatCurrency(prc, userCurrency)} now, value {formatCurrency(val, userCurrency)}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ padding: '1rem 0.35rem 0 0.35rem' }}>
-                        <p style={{ margin: '0 0 0.85rem', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.88rem' }}>{card.description}</p>
-
-                        {card.issue_limit ? (() => {
-                          const userPurchasedCount = userVouchers.filter(v => v.gift_card_id === card.id).length;
-                          const totalIssued = Math.max(card.issued_count || 0, userPurchasedCount);
-                          const remaining = card.issue_limit - totalIssued;
-                          const isSoldOut = remaining <= 0;
-                          return (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isSoldOut ? 'var(--red)' : 'var(--amber)' }}>
-                                {isSoldOut ? 'Sold out!' : `Only ${remaining} left`}
-                              </span>
-                              <span className="btn btn-secondary btn-sm">View details</span>
-                            </div>
-                          );
-                        })() : (
-                          <span className="btn btn-secondary btn-sm">View details</span>
-                        )}
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-
-              {totalMarketplacePages > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', padding: '0 0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
-                    Showing {(marketplacePage - 1) * MARKETPLACE_PER_PAGE + 1} - {Math.min(filteredCatalog.length, marketplacePage * MARKETPLACE_PER_PAGE)} of {filteredCatalog.length}
-                  </span>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      disabled={marketplacePage === 1}
-                      onClick={() => setMarketplacePage(p => Math.max(1, p - 1))}
-                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
-                    >
-                      Previous
-                    </button>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      disabled={marketplacePage === totalMarketplacePages}
-                      onClick={() => setMarketplacePage(p => Math.min(totalMarketplacePages, p + 1))}
-                      style={{ borderRadius: '8px', padding: '0.4rem 0.8rem' }}
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <BrandCatalogue search={catalogSearch} />
         </div>
       )}
 
