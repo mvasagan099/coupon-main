@@ -135,17 +135,19 @@ test('multiple merchant companies select one deterministic company instead of fa
   assert.equal(limit, 1); assert.equal(company.id, 'approved-company');
 });
 function brandCatalogue() { return compile(fs.readFileSync(path.join(root, 'src/lib/brandCatalog.ts'), 'utf8'), {}); }
-test('15 distinct famous-brand previews contain no invented coupon inventory', () => {
+test('15 distinct brand previews use explicitly marked sample details and bundled logos', () => {
   const { CATALOGUE_BRANDS, getCatalogueBrand } = brandCatalogue();
   assert.equal(CATALOGUE_BRANDS.length, 15); assert.equal(new Set(CATALOGUE_BRANDS.map(brand => brand.slug)).size, 15);
   for (const name of ['amazon', 'flipkart', 'meesho', 'facebook']) assert.ok(getCatalogueBrand(name));
   assert.equal(getCatalogueBrand('unknown'), undefined);
-  for (const brand of CATALOGUE_BRANDS) { assert.ok(brand.description); assert.equal('price' in brand, false); assert.equal('expiry_date' in brand, false); }
-});
-test('brand discovery uses issuer identity rather than unrelated coupon titles', () => {
-  const { getCatalogueBrand, getBrandOffers } = brandCatalogue();
-  const matches = getBrandOffers(getCatalogueBrand('amazon'), [{ id: 'real', company_name: ' Amazon ' }, { id: 'unrelated', company_name: 'Another merchant', title: 'Amazon-themed offer' }]);
-  assert.equal(matches.length, 1); assert.equal(matches[0].id, 'real');
+  for (const brand of CATALOGUE_BRANDS) {
+    assert.ok(brand.description); assert.equal(brand.sample.isSample, true);
+    assert.ok(brand.sample.price > 0 && brand.sample.price < brand.sample.value);
+    assert.ok(Date.parse(brand.sample.expiryDate) > Date.parse(brand.sample.launchDate));
+    assert.equal('id' in brand.sample, false); assert.equal('company_id' in brand.sample, false);
+    const logo = fs.readFileSync(path.join(root, 'public', brand.logoPath), 'utf8');
+    assert.match(logo, /<svg/); assert.doesNotMatch(logo, /<script|<foreignObject|javascript:|onload=/i);
+  }
 });
 test('details purchase eligibility fails closed for wrong country, expiry, unpublished and sold-out offers', () => {
   const { getOfferUnavailableReason } = brandCatalogue();
@@ -158,22 +160,44 @@ test('details purchase eligibility fails closed for wrong country, expiry, unpub
 });
 test('purchase confirmation prevents double submission and never purchases a brand preview', async () => {
   let resolvePayment, calls = 0, navigated = false;
-  const ctx = { offer: undefined, user: { id: 'qa', email: 'qa@example.invalid' }, canBuy: false, purchasing: { current: false }, setBusy() {}, setPurchaseError() {},
+  const ctx = { brand: undefined, offer: undefined, user: { id: 'qa', email: 'qa@example.invalid' }, canBuy: false, purchasing: { current: false }, setBusy() {}, setPurchaseError() {},
     purchaseGiftCard: () => { calls++; return new Promise(resolve => { resolvePayment = resolve; }); }, dialog: { current: { close() {} } }, success() {},
     navigate: path => { navigated = path === '/dashboard/cards'; }, messageOf: error => error.message };
   const confirm = nestedFunction('src/pages/MarketplaceDetailsPage.tsx', 'confirmPurchase', ctx);
   await confirm(); assert.equal(calls, 0);
   ctx.offer = { id: 'published-offer', price: 500 }; ctx.canBuy = true;
+  ctx.brand = { slug: 'amazon' }; await confirm(); assert.equal(calls, 0); ctx.brand = undefined;
   const first = confirm(); await confirm(); assert.equal(calls, 1); resolvePayment({}); await first; assert.equal(navigated, true);
 });
 test('brand catalogue renders 15 links and no home-page purchase controls', () => {
   const React = require('react'); const { renderToStaticMarkup } = require('react-dom/server'); const { MemoryRouter } = require('react-router-dom');
   const exports = compile(fs.readFileSync(path.join(root, 'src/components/BrandCatalogue.tsx'), 'utf8'), {
-    require: name => name.includes('brandCatalog') ? brandCatalogue() : name.endsWith('.css') ? {} : require(name),
+    require: name => name.includes('brandCatalog') ? brandCatalogue() : name.includes('BrandLogo') ? compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }) : name.endsWith('.css') ? {} : require(name),
   });
   const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: '' })));
   assert.equal((html.match(/aria-label="View .*? coupon details"/g) || []).length, 15);
+  assert.equal((html.match(/<img /g) || []).length, 15);
   assert.equal(html.includes('<button'), false); assert.equal(html.includes('Buy coupon'), false);
   const filtered = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: 'Meesho' })));
   assert.equal((filtered.match(/aria-label="View .*? coupon details"/g) || []).length, 1);
+});
+test('all 15 sample detail pages keep Buy disabled even when matching real inventory exists', () => {
+  const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+  const { Link, MemoryRouter } = require('react-router-dom');
+  const { CATALOGUE_BRANDS, getCatalogueBrand, getOfferUnavailableReason } = brandCatalogue();
+  const { getCountryByCode } = compile(fs.readFileSync(path.join(root, 'src/lib/countries.ts'), 'utf8'), {});
+  const BrandLogo = compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }).default;
+  for (const brand of CATALOGUE_BRANDS) {
+    let stateIndex = 0;
+    const data = { profile: { country_code: 'IN', currency: 'INR', wallet_balance: 100000 }, offers: [{ id: 'real-matching-offer', company_name: brand.name, country_code: 'IN', price: 500 }] };
+    const context = { require, useAuth: () => ({ user: { id: 'qa' } }), useNavigate: () => () => {}, useToast: () => ({ success() {} }), useNow: () => Date.parse('2026-10-15'),
+      useState: initial => [stateIndex++ === 0 ? data : initial, () => {}], useRef: initial => ({ current: initial }), useEffect() {},
+      getCatalogueBrand, getOfferUnavailableReason, getCountryByCode, BrandLogo, Link, ArrowLeft: () => null, ShieldCheck: () => null,
+      dateLabel: value => value.slice(0, 10), formatCurrency: (amount, currency) => `${currency} ${amount}` };
+    const Details = nestedFunction('src/pages/MarketplaceDetailsPage.tsx', 'DetailsContent', context);
+    const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(Details, { brandSlug: brand.slug, onRetry() {} })));
+    assert.match(html, /disabled=""[^>]*>Buy coupon/); assert.equal(html.includes('<dialog'), false);
+    assert.ok(html.includes('SAMPLE COUPON')); assert.ok(html.includes(brand.sample.launchDate.slice(0, 10))); assert.ok(html.includes(brand.sample.expiryDate.slice(0, 10)));
+    assert.equal(html.includes('Wallet balance:'), false); assert.ok(html.includes(`${brand.name} logo`));
+  }
 });
