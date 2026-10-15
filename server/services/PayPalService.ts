@@ -26,7 +26,9 @@ export class PayPalService implements PaymentServiceI {
     this.clientSecret = process.env.PAYPAL_CLIENT_SECRET ?? '';
     this.webhookId    = process.env.PAYPAL_WEBHOOK_ID    ?? '';
 
-    const isSandbox = process.env.NODE_ENV !== 'production';
+    const mode = process.env.PAYPAL_MODE ?? (process.env.NODE_ENV === 'production' ? 'live' : 'sandbox');
+    if (mode !== 'sandbox' && mode !== 'live') throw new Error('PAYPAL_MODE must be sandbox or live.');
+    const isSandbox = mode === 'sandbox';
     this.baseUrl = isSandbox
       ? 'https://api-m.sandbox.paypal.com'
       : 'https://api-m.paypal.com';
