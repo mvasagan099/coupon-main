@@ -95,6 +95,7 @@ export interface GiftCard {
   issue_limit?: number | null;
   created_at: string;
   issued_count?: number;
+  is_active?: boolean;
 }
 
 export interface Coupon {
@@ -271,6 +272,23 @@ export async function getCompanyByOwner(ownerId: string): Promise<Company | null
   }
 }
 
+const MERCHANT_DOCUMENT_BUCKET = 'merchant-documents';
+export async function uploadMerchantDocument(userId: string, file: File): Promise<string> {
+  if (!isSupabaseConfigured) throw new Error('Document upload is unavailable until Supabase is configured.');
+  const extensions: Record<string,string> = { 'application/pdf':'pdf', 'image/jpeg':'jpg', 'image/png':'png' };
+  if (!extensions[file.type] || file.size === 0 || file.size > 5 * 1024 * 1024) throw new Error('Choose a PDF, JPG or PNG up to 5 MB.');
+  const path = `${userId}/${crypto.randomUUID()}.${extensions[file.type]}`;
+  const { error } = await supabase.storage.from(MERCHANT_DOCUMENT_BUCKET).upload(path,file,{contentType:file.type,upsert:false});
+  if (error) throw error;
+  return path;
+}
+export async function getMerchantDocumentUrl(path: string): Promise<string> {
+  if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(pdf|jpg|png)$/.test(path)) throw new Error('No uploaded document is available. Ask the merchant to resubmit.');
+  const { data, error } = await supabase.storage.from(MERCHANT_DOCUMENT_BUCKET).createSignedUrl(path,60,{download:true});
+  if (error) throw error;
+  return data.signedUrl;
+}
+
 export async function submitOnboarding(companyData: Partial<Company>): Promise<Company> {
   const insertPayload = {
     name: companyData.name,
@@ -283,7 +301,7 @@ export async function submitOnboarding(companyData: Partial<Company>): Promise<C
     bank_name: companyData.bank_name,
     account_number: companyData.account_number,
     ifsc_code: companyData.ifsc_code,
-    document_url: companyData.document_url || "cert_incorporation.pdf",
+    document_url: companyData.document_url,
     owner_id: companyData.owner_id,
   };
 
@@ -446,40 +464,16 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     }));
 
     if (remoteCards.length > 0) {
-      // Deduplicate remote cards by ID and by company_id + title
+      // Preserve distinct offers even when their titles match.
       const seenIds = new Set<string>();
-      const seenKeys = new Set<string>();
       const deduped: GiftCard[] = [];
-
       for (const card of remoteCards) {
-        const titleKey = `${card.company_id || ""}::${card.country_code || "unassigned"}::${(card.title || "").trim().toLowerCase()}`;
-        if (!seenIds.has(card.id) && !seenKeys.has(titleKey)) {
-          seenIds.add(card.id);
-          seenKeys.add(titleKey);
-          deduped.push(card);
-        }
+        if (!seenIds.has(card.id)) { seenIds.add(card.id); deduped.push(card); }
       }
       return deduped;
     }
 
-    // Fallback only if database has no cards
-    const localCards = getLocal<GiftCard[]>("cv_gift_cards", []);
-    const localFiltered = companyId ? localCards.filter(c => c.company_id === companyId) : localCards;
-    const seenLocal = new Set<string>();
-    const dedupedLocal: GiftCard[] = [];
-
-    for (const card of localFiltered) {
-      const titleKey = `${card.company_id || ""}::${card.country_code || "unassigned"}::${(card.title || "").trim().toLowerCase()}`;
-      if (!seenLocal.has(card.id) && !seenLocal.has(titleKey)) {
-        seenLocal.add(card.id);
-        seenLocal.add(titleKey);
-        dedupedLocal.push({
-          ...card,
-          issued_count: Math.max(card.issued_count || 0, issuedCounts[card.id] || 0)
-        });
-      }
-    }
-    return dedupedLocal;
+    return [];
   } catch (err: any) {
     if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] getGiftCards failed, falling back to LocalStorage:", err.message);
@@ -1123,7 +1117,7 @@ export async function addFunds(_userId: string, _amount: number, _paymentMethod:
 
 export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
   try {
-    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
+    if (!isSupabaseConfigured || hasTimedOut) throw new Error("Verified financial history is unavailable. Check the connection and retry.");
 
     const depositsQuery = supabase
       .from('deposits')
@@ -1138,9 +1132,12 @@ export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
       .order('created_at', { ascending: false });
 
     const [depRes, trfRes] = await Promise.all([
-      withTimeout(depositsQuery, 8000).catch(() => ({ data: null, error: null })),
-      withTimeout(transfersQuery, 8000).catch(() => ({ data: null, error: null })),
+      withTimeout(depositsQuery, 8000),
+      withTimeout(transfersQuery, 8000),
     ]);
+
+    if (depRes.error) throw depRes.error;
+    if (trfRes.error) throw trfRes.error;
 
     const formatPaymentMethod = (method?: string) => {
       if (!method) return 'Wallet Top-up';
@@ -1171,19 +1168,10 @@ export async function getUserDeposits(userId: string): Promise<UserDeposit[]> {
       created_at: t.created_at,
     }));
 
-    const localDeposits = getLocal<UserDeposit[]>("cv_deposits", []).filter(d => d.user_id === userId);
-
-    const existingIds = new Set([...dbDeposits.map(d => d.id), ...dbTransfers.map(t => t.id)]);
-    const uniqueLocal = localDeposits.filter(d => !existingIds.has(d.id));
-
-    const allCombined = [...dbDeposits, ...dbTransfers, ...uniqueLocal].map(d => ({
-      ...d,
-      payment_method: formatPaymentMethod(d.payment_method),
-    }));
+    const allCombined = [...dbDeposits, ...dbTransfers];
     return allCombined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  } catch {
-    const localDeposits = getLocal<UserDeposit[]>("cv_deposits", []);
-    return localDeposits.filter(d => d.user_id === userId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  } catch (error) {
+    throw error instanceof Error ? error : new Error("Could not load verified deposit history. Please retry.");
   }
 }
 
@@ -1491,14 +1479,12 @@ export async function adminUpdateWithdrawalStatus(
   id: string,
   status: 'completed' | 'rejected'
 ): Promise<void> {
-  const { error } = await withTimeout(
-    supabase
-      .from('withdrawals')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', id),
-    8000
+  const { data, error } = await withTimeout(
+    supabase.from('withdrawals').update({ status, updated_at: new Date().toISOString() })
+      .eq('id', id).eq('status', 'pending').select('id').maybeSingle(), 8000
   );
   if (error) throw error;
+  if (!data) throw new Error('This withdrawal was already processed. Refresh the list.');
 }
 
 // ---- Support Ticket System ----------------------------------------

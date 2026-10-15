@@ -20,6 +20,7 @@ import {
   deleteCompany,
   deleteGiftCard,
   getCompanies,
+  getMerchantDocumentUrl,
   getCompanyStats,
   getGiftCards,
   updateCompanyLimit,
@@ -132,11 +133,7 @@ export default function AdminDashboard() {
     email: '',
   });
 
-  const securityLogs = [
-    { time: '2026-05-18 14:32:01', event: 'High frequency redemptions', detail: 'User usr_732 claimed 12 coupons in 45 seconds.', severity: 'High', target: 'Acme Corp' },
-    { time: '2026-05-18 11:15:40', event: 'Rapid balance fluctuation', detail: 'Wallet value rose by ₹48.50 in under one minute.', severity: 'Medium', target: 'usr_902' },
-    { time: '2026-05-17 09:44:12', event: 'Multiple failed scan attempts', detail: 'Invalid UUID token signature processed by one counter node.', severity: 'Low', target: 'Register Counter Node B' },
-  ] as const;
+
 
   useEffect(() => {
     if (!section) {
@@ -568,7 +565,7 @@ export default function AdminDashboard() {
         <DashboardCard title="Platform GTV" value={`₹${platformGtv.toFixed(2)}`} variant="emerald" icon={<TrendingUp size={20} />} />
         <DashboardCard title="Pending approvals" value={String(pendingCompanies.length)} variant="primary" icon={<Clock size={20} />} />
         <DashboardCard title="Partners" value={String(companies.length)} variant="violet" icon={<Building2 size={20} />} />
-        <DashboardCard title="Security threats" value={String(securityLogs.length)} variant="amber" icon={<ShieldAlert size={20} />} />
+        <DashboardCard title="Security monitoring" value="Not connected" variant="amber" icon={<ShieldAlert size={20} />} />
       </div>
 
       {currentSection === 'overview' && (
@@ -1128,7 +1125,10 @@ export default function AdminDashboard() {
                     <p className="mono" style={{ margin: 0, fontSize: '0.8rem' }}>GSTIN: {company.gstin || 'None'}</p>
                     <p className="mono" style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-4)' }}>PAN: {company.pan || 'None'}</p>
                   </div>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setViewingDoc(company.document_url || 'cert_incorporation.pdf')}>
+                  <button className="btn btn-secondary btn-sm" onClick={async () => {
+                    try { setViewingDoc(await getMerchantDocumentUrl(company.document_url || '')); }
+                    catch (error) { toastError('Document unavailable', getErrorMessage(error, 'Could not access document.')); }
+                  }}>
                     {company.document_url || 'Open document'}
                   </button>
                   <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
@@ -1148,9 +1148,9 @@ export default function AdminDashboard() {
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(3,7,18,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
               <div className="glass-card-strong" style={{ maxWidth: '500px', width: '100%', padding: '2rem', textAlign: 'center' }}>
                 <span style={{ fontSize: '2rem' }}>DOC</span>
-                <h3 style={{ fontSize: '1.25rem', color: 'var(--text-1)', margin: '0.5rem 0' }}>Document vault preview</h3>
+                <h3 style={{ fontSize: '1.25rem', color: 'var(--text-1)', margin: '0.5rem 0' }}>Private verification document</h3>
                 <p className="mono" style={{ background: 'var(--bg-3)', padding: '1rem', borderRadius: '10px', border: '1px solid var(--border)', fontSize: '0.85rem', color: 'var(--cyan)' }}>
-                  {viewingDoc}
+                  <a href={viewingDoc} target="_blank" rel="noopener noreferrer">Download submitted document (link expires in 60 seconds)</a>
                 </p>
                 <button onClick={() => setViewingDoc(null)} className="btn btn-secondary" style={{ marginTop: '1rem', width: '100%' }}>
                   Close preview
@@ -1168,40 +1168,10 @@ export default function AdminDashboard() {
               <ShieldAlert size={20} style={{ color: 'var(--amber-500)' }} />
               Security incident log
             </h3>
-            <p style={{ color: 'var(--text-3)', marginBottom: '1.5rem', lineHeight: 1.6 }}>
-              Review recent anomalies, failed assertions, or suspiciously rapid transaction flows detected by the platform guardrails.
+            <p style={{ color: 'var(--text-3)', lineHeight: 1.6 }}>
+              Security event monitoring is not connected. No live threat count is available here.
+              Review Supabase authentication logs and payment server logs for current incidents.
             </p>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table className="premium-table">
-                <thead>
-                  <tr>
-                    <th>Timestamp</th>
-                    <th>Event type</th>
-                    <th>Severity</th>
-                    <th>Target / Actor</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {securityLogs.map((log, idx) => (
-                    <tr key={idx}>
-                      <td style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>{log.time}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--text-2)' }}>{log.event}</td>
-                      <td>
-                        <span className={`badge ${log.severity === 'High' ? 'badge-red' : log.severity === 'Medium' ? 'badge-amber' : 'badge-cyan'}`}>
-                          {log.severity}
-                        </span>
-                      </td>
-                      <td className="mono" style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>{log.target}</td>
-                      <td style={{ color: 'var(--text-2)', fontSize: '0.9rem', maxWidth: '300px', whiteSpace: 'normal', lineHeight: 1.5 }}>
-                        {log.detail}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
         </div>
       )}
@@ -1222,7 +1192,7 @@ export default function AdminDashboard() {
                   const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
                   try {
                     const count = await adminGenerateSettlements(prevMonth.getFullYear(), prevMonth.getMonth() + 1);
-                    success('Settlements generated', `Created ${count} new settlements for ${prevMonth.toLocaleDateString('default', { month: 'long', year: 'numeric' })}.`);
+                    success('Settlements generated', `Created or refreshed ${count} pending settlements for ${prevMonth.toLocaleDateString('default', { month: 'long', year: 'numeric' })}.`);
                     await loadSettlements();
                   } catch (err: unknown) {
                     toastError('Generation failed', getErrorMessage(err, 'Failed to generate settlements.'));

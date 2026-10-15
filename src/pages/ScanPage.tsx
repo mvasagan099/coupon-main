@@ -1,3 +1,4 @@
+import { useNow } from '../hooks/useNow';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { CouponValidation } from '../lib/supabase';
@@ -5,6 +6,7 @@ import { markCouponUsedById, validateCouponById } from '../lib/supabase';
 import { useToast } from '../components/Toast';
 
 export default function ScanPage() {
+  const now = useNow();
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
   const { success, error: toastError } = useToast();
@@ -49,7 +51,10 @@ export default function ScanPage() {
     }
   }
 
-  const isUsed = data?.is_used;
+  const isUsed = data?.is_used || data?.status?.toLowerCase() === 'redeemed';
+  const isExpired = !!data?.expiry_date && new Date(data.expiry_date).getTime() <= now;
+  const isActive = !!data && !isUsed && !isExpired && data.status?.toLowerCase() === 'active' && Number(data.remaining_balance) > 0;
+  const statusLabel = isUsed ? 'Already redeemed' : isExpired ? 'Expired' : isActive ? 'Valid and active' : 'Unavailable';
 
   return (
     <div
@@ -118,8 +123,8 @@ export default function ScanPage() {
                 borderBottom: '1px solid var(--border)',
               }}
             >
-              <span className={`badge ${isUsed ? 'badge-amber' : 'badge-green'}`}>
-                {isUsed ? 'Already redeemed' : 'Valid and active'}
+              <span className={`badge ${isActive ? 'badge-green' : 'badge-amber'}`}>
+                {statusLabel}
               </span>
               <h2 style={{ margin: '0.8rem 0 0.35rem', fontSize: '1.8rem', letterSpacing: '0.02em', wordSpacing: '0.08em', }}>
                 {data.company_name}
@@ -127,7 +132,7 @@ export default function ScanPage() {
               <p style={{ margin: 0, color: 'var(--text-3)', lineHeight: 1.6 }}>
                 {isUsed
                   ? 'This voucher has already been processed in the system.'
-                  : 'This voucher is ready for merchant-side redemption.'}
+                  : isActive ? 'This voucher is ready for merchant-side redemption.' : 'This voucher cannot be redeemed.'}
               </p>
             </div>
 
@@ -158,7 +163,7 @@ export default function ScanPage() {
               <button
                 className={`btn ${isUsed ? 'btn-secondary' : 'btn-primary'}`}
                 onClick={handleMarkUsed}
-                disabled={isUsed || marking || marked}
+                disabled={!isActive || marking || marked}
                 style={{ width: '100%' }}
               >
                 {marking ? (
@@ -169,7 +174,7 @@ export default function ScanPage() {
                 ) : isUsed || marked ? (
                   'Redemption already recorded'
                 ) : (
-                  'Redeem voucher'
+                  isActive ? 'Redeem voucher' : statusLabel
                 )}
               </button>
             </div>

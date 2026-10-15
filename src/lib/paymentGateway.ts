@@ -225,3 +225,14 @@ export async function confirmStripePayment(
 
   return { paymentIntentId: paymentIntent.id };
 }
+
+export interface StripeRecoveryResult {
+  state: 'paid' | 'resume' | 'cancelled' | 'processing';
+  amount?: number;
+  currency?: string;
+  orderId?: string;
+  clientSecret?: string;
+}
+export async function recoverStripePayment(intentId: string): Promise<StripeRecoveryResult> {
+  return serverPost('/api/v1/payments/stripe/recover', {intentId});
+}

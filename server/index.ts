@@ -10,7 +10,9 @@ import { StripeService } from './services/StripeService';
 import { PayPalService } from './services/PayPalService';
 import type { PaymentGateway } from './services/PaymentService';
 import { userAuthentication } from './security';
+import { verifyGameCoupon, CouponError } from './couponVerification';
 import { findPayment, settlePayment } from './paymentSettlement';
+import { recoverStripePayment } from './stripeRecovery';
 import { countryService } from './services/CountryService';
 import { exchangeRateService } from './services/ExchangeRateService';
 
@@ -207,65 +209,11 @@ app.post('/api/v1/coupons/verify', writeLimiter, authenticateAPIKey, async (req,
       return res.status(400).json({ success: false, code: 'INVALID_COUPON', message: 'couponCode is required.' });
     }
 
-    const { data: coupon, error: fetchError } = await supabase
-      .from('coupons')
-      .select('id, code, is_used, amount, remaining_balance, status, country_code, issued_to')
-      .ilike('code', couponCode.trim())
-      .maybeSingle();
-
-    if (fetchError || !coupon) {
-      return res.status(404).json({ success: false, code: 'INVALID_COUPON', message: 'Coupon not found.' });
-    }
-
-    if (coupon.is_used) {
-      return res.status(400).json({ success: false, code: 'REDEEMED', message: 'Coupon already redeemed.' });
-    }
-
-    if (coupon.status === 'DISABLED' || coupon.status === 'disabled') {
-      return res.status(400).json({ success: false, code: 'DISABLED', message: 'Coupon disabled.' });
-    }
-
-    // Resolve coupon country code (from coupon record or from profile of issuer)
-    let couponCountryRaw = coupon.country_code;
-    if (!couponCountryRaw && coupon.issued_to) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('country_code, country')
-        .eq('id', coupon.issued_to)
-        .maybeSingle();
-      if (profile) {
-        couponCountryRaw = profile.country_code || profile.country;
-      }
-    }
-
-    const normCouponCountry = normalizeCountryCode(couponCountryRaw);
-    const normUserCountry = normalizeCountryCode(userCountry);
-
-    // Enforce country match strictly if coupon is restricted to a specific country
-    if (normCouponCountry) {
-      if (!normUserCountry || normCouponCountry !== normUserCountry) {
-        return res.status(400).json({
-          success: false,
-          code: 'COUNTRY_MISMATCH',
-          couponCountry: normCouponCountry,
-          userCountry: normUserCountry || null,
-          message: `Country mismatch: This coupon was issued for ${normCouponCountry} and cannot be redeemed by an account in ${normUserCountry || 'a different country'}`
-        });
-      }
-    }
-
-    const effectiveAmount = coupon.amount || coupon.remaining_balance || 0;
-
-    return res.json({
-      success: true,
-      couponId: coupon.id,
-      amount: effectiveAmount,
-      currency: 'INR',
-      status: coupon.status || 'ACTIVE',
-      countryCode: normCouponCountry || null,
-    });
+    const quote = await verifyGameCoupon(supabase, couponCode, normalizeCountryCode(userCountry));
+    return res.json(quote);
 
   } catch (err) {
+    if (err instanceof CouponError) return res.status(err.status).json({ success:false, code:err.code, message:err.message });
     console.error('[/coupons/verify]', err);
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
@@ -532,6 +480,17 @@ app.get('/api/v1/payments/gateways', (req, res) => {
  * Body: { gateway: 'razorpay'|'stripe'|'paypal', amount: number, currency?: string }
  * Authorization: Bearer <supabase_access_token>
  */
+app.post('/api/v1/payments/stripe/recover', writeLimiter, authenticateUserJWT, async (req, res) => {
+  try {
+    const { intentId } = req.body;
+    if (typeof intentId !== 'string' || !/^pi_[a-zA-Z0-9]+$/.test(intentId)) return res.status(400).json({message:'Invalid payment identity.'});
+    if (!stripeService) stripeService = new StripeService();
+    return res.json(await recoverStripePayment(supabase, stripeService, res.locals.userId, intentId));
+  } catch (error) {
+    return res.status(400).json({message:error instanceof Error ? error.message : 'Payment recovery unavailable.'});
+  }
+});
+
 app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (req, res) => {
   try {
     const { gateway, amount, currency } = req.body;

@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { validateCoupon, redeemCouponAmount } from '../lib/supabase';
-import type { CouponValidation } from '../lib/supabase';
+interface DemoCoupon { coupon_code: string; remaining_balance: number }
 
 interface Product {
   id: string;
@@ -81,7 +80,7 @@ const PRODUCTS: Product[] = [
 export default function DemoStorePage() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [couponCode, setCouponCode] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<CouponValidation | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<DemoCoupon | null>(null);
   const [couponError, setCouponError] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkoutState, setCheckoutState] = useState<'idle' | 'processing' | 'success'>('idle');
@@ -105,19 +104,10 @@ export default function DemoStorePage() {
     setLoading(true);
     setCouponError('');
     try {
-      const validation = await validateCoupon(couponCode);
-      
-      if (validation.status === 'redeemed' || validation.is_used) {
-        throw new Error('This voucher has already been fully redeemed.');
+      if (couponCode.trim().toUpperCase() !== 'DEMO100') {
+        throw new Error('Use DEMO100 to try this demo. Real vouchers are not accepted.');
       }
-      if (validation.status === 'expired') {
-        throw new Error('This voucher has expired.');
-      }
-      if ((validation.remaining_balance || 0) <= 0) {
-        throw new Error('This voucher has no remaining balance.');
-      }
-      
-      setAppliedCoupon(validation);
+      setAppliedCoupon({ coupon_code: 'DEMO100', remaining_balance: 100 });
       setCouponCode('');
     } catch (err: unknown) {
       setCouponError(err instanceof Error ? err.message : 'Invalid coupon code');
@@ -136,11 +126,7 @@ export default function DemoStorePage() {
     setCheckoutState('processing');
     
     try {
-      if (appliedCoupon && discountAmount > 0) {
-        await redeemCouponAmount(appliedCoupon.coupon_id, discountAmount);
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 500));
       setCheckoutState('success');
     } catch (err: unknown) {
       alert(`Checkout failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -165,13 +151,13 @@ export default function DemoStorePage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 style={{ margin: '0 0 1rem', color: '#000', fontSize: '2rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', }}>Order Confirmed</h2>
+          <h2 style={{ margin: '0 0 1rem', color: '#000', fontSize: '2rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', }}>Demo complete</h2>
           <p style={{ color: '#666', lineHeight: '1.6', margin: '0 0 2.5rem', fontSize: '1.125rem' }}>
-            Thank you for purchasing the {selectedProduct?.name}. It will be shipped shortly.
+            You previewed checkout for {selectedProduct?.name}. No payment was collected, no voucher was redeemed, and no order will be shipped.
           </p>
           {appliedCoupon && (
             <div style={{ background: '#f5f5f7', padding: '1.5rem', borderRadius: '16px', marginBottom: '2.5rem', textAlign: 'left' }}>
-              <p style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Gift Card Applied</p>
+              <p style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Demo discount applied</p>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#000', fontSize: '1.125rem' }}>
                 <span style={{ fontFamily: 'monospace' }}>{appliedCoupon.coupon_code}</span>
                 <span>-₹{discountAmount.toFixed(2)}</span>
@@ -257,6 +243,8 @@ export default function DemoStorePage() {
         </div>
       </header>
 
+      <div role="note" style={{ padding: '1rem', textAlign: 'center', background: '#fff3cd', color: '#3d3100' }}>Demo store — no real orders or payments. Try DEMO100; real vouchers are not accepted.</div>
+
       <main style={{ maxWidth: '1200px', margin: '4rem auto', padding: '0 2rem' }}>
         
         {!selectedProduct ? (
@@ -267,7 +255,7 @@ export default function DemoStorePage() {
               <p style={{ color: '#666', fontSize: '1.25rem', maxWidth: '600px', margin: '0 auto' }}>Experience sound exactly as the artist intended. Explore our curated collection of high-fidelity devices.</p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '2rem' }}>
               {filteredProducts.map(product => (
                 <button key={product.id} onClick={() => setSelectedProduct(product)} style={{ textAlign: 'left', display: 'block', width: '100%', background: '#fcfcfc', border: '1px solid #f0f0f0', borderRadius: '24px', overflow: 'hidden', cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }} onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 24px rgba(0,0,0,0.06)' }} onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.02)' }}>
                   <div style={{ background: '#f5f5f7', height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
@@ -280,7 +268,7 @@ export default function DemoStorePage() {
                       <div style={{ fontWeight: 600, fontSize: '1.125rem' }}>₹{product.price}</div>
                     </div>
                     <p style={{ color: '#666', margin: '0 0 1.5rem', fontSize: '0.9rem', lineHeight: 1.5 }}>{product.description}</p>
-                    <div style={{ textAlign: 'center', width: '100%', background: '#000', color: 'white', border: 'none', padding: '0.875rem', borderRadius: '99px', fontWeight: 600 }}>Buy Now</div>
+                    <div style={{ textAlign: 'center', width: '100%', background: '#000', color: 'white', border: 'none', padding: '0.875rem', borderRadius: '99px', fontWeight: 600 }}>Preview checkout</div>
                   </div>
                 </button>
               ))}
@@ -411,12 +399,12 @@ export default function DemoStorePage() {
                   boxShadow: '0 10px 20px rgba(0,0,0,0.1)'
                 }}
               >
-                {checkoutState === 'processing' ? 'Processing...' : `Pay ₹${finalTotal.toFixed(2)}`}
+                {checkoutState === 'processing' ? 'Processing...' : `Simulate checkout · ₹${finalTotal.toFixed(2)}`}
               </button>
               
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '1.5rem', color: '#888', fontSize: '0.875rem' }}>
                 <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                <span>Secure SSL Encrypted Checkout</span>
+                <span>Demo only · no real payments or voucher redemption</span>
               </div>
             </div>
           </div>

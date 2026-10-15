@@ -17,6 +17,7 @@ import {
   getGiftCards,
   getRedemptionTransactions,
   submitOnboarding,
+  uploadMerchantDocument,
   getCompanyCoupons,
   merchantGetSettlements,
 } from '../lib/supabase';
@@ -66,6 +67,8 @@ export default function MerchantDashboard() {
   const [company, setCompany] = useState<Company | null>(null);
 
   const [kycStep, setKycStep] = useState(1);
+  const [kycFile, setKycFile] = useState<File | null>(null);
+  const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
   const [onboardingForm, setOnboardingForm] = useState({
     businessName: '',
     prefix: '',
@@ -75,7 +78,6 @@ export default function MerchantDashboard() {
     bankName: '',
     accountNumber: '',
     ifscCode: '',
-    documentName: '',
   });
 
   const [offers, setOffers] = useState<GiftCard[]>([]);
@@ -163,6 +165,7 @@ export default function MerchantDashboard() {
   const handleKycSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
+    if (kycStep === 2 && !kycFile) { toastError('Document required', 'Choose your business verification document.'); return; }
     if (kycStep < 3) {
       setKycStep((previous) => previous + 1);
       return;
@@ -170,6 +173,9 @@ export default function MerchantDashboard() {
 
     try {
       setLoadingCompany(true);
+      if (!user?.id || !kycFile) throw new Error('A signed-in account and KYC document are required.');
+      const documentPath = uploadedDocument ?? await uploadMerchantDocument(user.id, kycFile);
+      setUploadedDocument(documentPath);
       const payload: Partial<Company> = {
         name: onboardingForm.businessName,
         prefix: onboardingForm.prefix || onboardingForm.businessName.substring(0, 3),
@@ -180,7 +186,7 @@ export default function MerchantDashboard() {
         bank_name: onboardingForm.bankName,
         account_number: onboardingForm.accountNumber,
         ifsc_code: onboardingForm.ifscCode,
-        document_url: onboardingForm.documentName || 'cert_incorporation.pdf',
+        document_url: documentPath,
         owner_id: user?.id,
       };
 
@@ -928,14 +934,9 @@ export default function MerchantDashboard() {
                       </div>
                       <div>
                         <label className="label">KYC document</label>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          style={{ width: '100%' }}
-                          onClick={() => setOnboardingForm({ ...onboardingForm, documentName: `cert_incorporation_${onboardingForm.prefix.toLowerCase() || 'merchant'}.pdf` })}
-                        >
-                          {onboardingForm.documentName || 'Simulate document upload'}
-                        </button>
+                        <input className="input" type="file" accept="application/pdf,image/jpeg,image/png" required
+                          onChange={(event) => { setKycFile(event.target.files?.[0] ?? null); setUploadedDocument(null); }} />
+                        <p className="text-sm">Private PDF, JPG or PNG, up to 5 MB. Only you and authorized administrators can access it.</p>
                       </div>
                     </div>
                   )}

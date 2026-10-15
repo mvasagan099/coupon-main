@@ -46,6 +46,8 @@ export class StripeService implements PaymentServiceI {
     };
   }
 
+  async retrieveIntent(id: string) { return this.stripe.paymentIntents.retrieve(id); }
+
   async verifyPayment(input: VerifyPaymentInput): Promise<VerifyPaymentResult> {
     const { gatewayOrderId } = input;
 

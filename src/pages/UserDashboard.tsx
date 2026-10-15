@@ -1,3 +1,4 @@
+import { useNow } from '../hooks/useNow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
@@ -12,6 +13,8 @@ import PaymentMethodSelector from '../components/PaymentMethodSelector';
 import type { PaymentGateway } from '../lib/paymentGateway';
 import {
   createPayment,
+  getStripe,
+  recoverStripePayment as recoverStripeOrder,
   verifyPayment as verifyGatewayPayment,
   loadRazorpayScript,
   openRazorpayCheckout,
@@ -62,6 +65,7 @@ function cleanPaymentMethod(method?: string): string {
 }
 
 export default function UserDashboard() {
+  const now = useNow();
   const { user, isLoading: authLoading } = useAuth();
   const { success, error: toastError } = useToast();
   const navigate = useNavigate();
@@ -104,6 +108,27 @@ export default function UserDashboard() {
     else localStorage.removeItem(paymentRecoveryKey);
     setPendingOrder(order);
   };
+  const stripeRecoveryKey = `cv_pending_stripe_${user?.id ?? 'signed-out'}`;
+  const [pendingStripeIntent, setPendingStripeIntent] = useState<string | null>(null);
+  const stripeOrderRef = useRef<string | null>(null);
+  const [stripeResumeOrder, setStripeResumeOrder] = useState<{orderId:string;clientSecret:string} | null>(null);
+  const [stripeRecovering, setStripeRecovering] = useState(false);
+  useEffect(() => {
+    if (!user?.id) return;
+    const returnedIntent = new URL(window.location.href).searchParams.get('payment_intent');
+    const pending = returnedIntent?.startsWith('pi_') ? returnedIntent : localStorage.getItem(stripeRecoveryKey);
+    if (pending) localStorage.setItem(stripeRecoveryKey, pending);
+    const timer = window.setTimeout(() => {
+      setPendingStripeIntent(pending);
+      setPendingOrder(localStorage.getItem(paymentRecoveryKey));
+    }, 0);
+    if (returnedIntent) {
+      const url = new URL(window.location.href);
+      for (const key of ['payment_intent','payment_intent_client_secret','redirect_status']) url.searchParams.delete(key);
+      window.history.replaceState(null,'',url.toString());
+    }
+    return () => window.clearTimeout(timer);
+  }, [user?.id, stripeRecoveryKey, paymentRecoveryKey]);
   const [selectedGateway, setSelectedGateway] = useState<PaymentGateway>('paypal');
   const [deposits, setDeposits] = useState<UserDeposit[]>([]);
   const [depositPage, setDepositPage] = useState(1);
@@ -226,6 +251,31 @@ export default function UserDashboard() {
       setLoading(false);
     }
   }, [userId]);
+
+  const recoverStripePayment = async () => {
+    if (!pendingStripeIntent) return;
+    setStripeRecovering(true);
+    try {
+      const result = await recoverStripeOrder(pendingStripeIntent);
+      if (result.state === 'resume' && result.orderId && result.clientSecret) {
+        setStripeResumeOrder({orderId:result.orderId,clientSecret:result.clientSecret});
+        setAddMoneyAmount(String(Number(result.amount) / 100));
+        setSelectedGateway('stripe');
+        setShowAddMoneyModal(true);
+        setPendingStripeIntent(null);
+        return;
+      }
+      if (result.state === 'processing') throw new Error('The bank is still processing this payment. Retry verification; do not pay again.');
+      localStorage.removeItem(stripeRecoveryKey);
+      setPendingStripeIntent(null);
+      setStripeResumeOrder(null);
+      if (result.state === 'cancelled') { success('Payment cancelled', 'No new charge was made. You can start a new payment.'); return; }
+      await refreshWalletBalance();
+      await loadData();
+      success('Payment confirmed', `Your wallet was credited ${formatCurrency(result.amount ?? 0, result.currency ?? userCurrency)}.`);
+    } catch (error) { toastError('Payment pending', getErrorMessage(error, 'Retry verification; do not pay again.')); }
+    finally { setStripeRecovering(false); }
+  };
 
   useEffect(() => {
     if (authLoading) return;
@@ -363,7 +413,7 @@ export default function UserDashboard() {
   const [stripeLoading, setStripeLoading] = useState(false);
 
   useEffect(() => {
-    if (!showAddMoneyModal || selectedGateway !== 'stripe') {
+    if (!showAddMoneyModal || selectedGateway !== 'stripe' || pendingStripeIntent) {
       stripeElementsRef.current = null;
       return;
     }
@@ -375,7 +425,6 @@ export default function UserDashboard() {
 
       setStripeLoading(true);
       try {
-        const { getStripe } = await import('../lib/paymentGateway');
         const stripe = await getStripe();
         if (!stripe || !active) return;
 
@@ -383,12 +432,14 @@ export default function UserDashboard() {
         const container = document.getElementById('stripe-payment-element');
         if (container) container.innerHTML = '';
 
-        const orderData = await createPayment('stripe', amountNum, userCurrency);
+        const orderData = stripeResumeOrder ?? await createPayment('stripe', amountNum, userCurrency);
         if (!active) return;
         if (!orderData.clientSecret) {
           throw new Error('Stripe client secret not received.');
         }
 
+
+        stripeOrderRef.current = orderData.orderId;
 
         // Mount Stripe elements
         setTimeout(() => {
@@ -411,18 +462,21 @@ export default function UserDashboard() {
       }
     };
 
-    void initStripe();
+    const initTimer = window.setTimeout(() => void initStripe(), 600);
 
     return () => {
       active = false;
+      window.clearTimeout(initTimer);
+      stripeOrderRef.current = null;
+      stripeElementsRef.current = null;
       const el = document.getElementById('stripe-payment-element');
       if (el) el.innerHTML = '';
     };
-  }, [showAddMoneyModal, selectedGateway, addMoneyAmount, toastError, userCurrency]);
+  }, [showAddMoneyModal, selectedGateway, addMoneyAmount, toastError, userCurrency, pendingStripeIntent, stripeResumeOrder]);
 
   // ── Stripe payment handler ───────────────────────────────────────────────────
   const handleStripePayment = async () => {
-    if (!user?.id) return;
+    if (!user?.id || pendingStripeIntent) return;
     const elements = stripeElementsRef.current;
     if (!elements) {
       toastError('Stripe Error', 'Stripe payment card field is not loaded yet.');
@@ -431,10 +485,13 @@ export default function UserDashboard() {
 
     setAddMoneyLoading(true);
     try {
-      const { getStripe } = await import('../lib/paymentGateway');
       const stripe = await getStripe();
       if (!stripe) throw new Error('Stripe SDK not loaded.');
 
+      const intentId = stripeOrderRef.current;
+      if (!intentId) throw new Error('Payment order is not ready.');
+      // Save before confirmation, so redirects and verification failures remain recoverable.
+      localStorage.setItem(stripeRecoveryKey, intentId);
       // Confirm payment using the mounted elements instance
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
@@ -460,15 +517,20 @@ export default function UserDashboard() {
       if (verify.verified) {
         await refreshWalletBalance();
         await loadData();
-        success('Funds added', `Successfully added $${verify.amount.toFixed(2)} to your wallet.`);
+        localStorage.removeItem(stripeRecoveryKey);
+        setPendingStripeIntent(null);
+        setStripeResumeOrder(null);
+        success('Funds added', `Successfully added ${formatCurrency(verify.amount, verify.currency)} to your wallet.`);
         setShowAddMoneyModal(false);
         setAddMoneyAmount('500');
       } else {
-        toastError('Verification failed', 'Stripe payment could not be verified.');
+        setPendingStripeIntent(localStorage.getItem(stripeRecoveryKey));
+        toastError('Verification pending', 'Retry verification before making another payment.');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Payment failed.';
-      toastError('Stripe Error', msg);
+      setPendingStripeIntent(localStorage.getItem(stripeRecoveryKey));
+      toastError('Stripe verification pending', `${msg} Retry verification before making another payment.`);
     } finally {
       setAddMoneyLoading(false);
     }
@@ -577,7 +639,7 @@ export default function UserDashboard() {
         brand: cleanPaymentMethod(deposit.payment_method),
         type: 'Deposit',
         amount: `+${formatCurrency(deposit.amount, userCurrency)}`,
-        status: deposit.status === 'completed' ? 'Completed' : 'Pending',
+        status: deposit.status === 'completed' ? 'Completed' : deposit.status === 'failed' ? 'Failed' : 'Pending',
       });
     });
 
@@ -615,9 +677,10 @@ export default function UserDashboard() {
       else if (priceFilter === 'mid') matchesPrice = card.price >= 500 && card.price <= 2000;
       else if (priceFilter === 'high') matchesPrice = card.price > 2000;
 
-      return !!userCountryCode && card.country_code === userCountryCode && matchesSearch && matchesPrice;
+      return !!userCountryCode && card.country_code === userCountryCode && card.is_active !== false &&
+        (!card.expiry_date || new Date(card.expiry_date).getTime() > now) && matchesSearch && matchesPrice;
     });
-  }, [catalogSearch, giftCards, priceFilter, userCountryCode]);
+  }, [catalogSearch, giftCards, priceFilter, userCountryCode, now]);
 
   const totalDepositPages = Math.ceil(deposits.length / ITEMS_PER_PAGE);
   const slicedDeposits = deposits.slice(
@@ -673,6 +736,17 @@ export default function UserDashboard() {
   return (
     <PayPalScriptProvider key={userCurrency} deferLoading={!userCountryCode || ["INR", "AED"].includes(userCurrency)} options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: userCurrency, intent: "capture" }}>
       <div className="dashboard-container">
+      {pendingStripeIntent && <div className="glass-card" role="status" style={{ padding:'1rem', marginBottom:'1rem' }}>
+        <p>A Stripe payment needs verification. Check its status before paying again.</p>
+        <button className="btn btn-secondary" disabled={stripeRecovering} onClick={() => void recoverStripePayment()}>
+          {stripeRecovering ? 'Verifying payment…' : 'Verify pending Stripe payment'}
+        </button>
+      </div>}
+      {loadError && currentSection !== 'marketplace' && <div role="alert" className="glass-card" style={{padding:'1rem'}}>
+        <p>Financial history could not be refreshed: {loadError}</p>
+        <button className="btn btn-secondary" onClick={() => void loadData()}>Retry loading history</button>
+      </div>}
+
 
       {currentSection === 'marketplace' && (
         <div className="dashboard-section fade-in">
@@ -1616,12 +1690,7 @@ export default function UserDashboard() {
                   {formatCurrency((selectedProduct.price ?? 0), userCurrency)}
                 </strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                <span style={{ color: 'var(--text-3)' }}>Cashback (10%)</span>
-                <strong style={{ color: '#10b981' }}>
-                  {(`+${formatCurrency((selectedProduct.value ?? 0) * 0.1, userCurrency)}`)}
-                </strong>
-              </div>
+
             </div>
             {/* Remove name and method fields as they are not used for wallet purchases */}
 
@@ -1922,7 +1991,7 @@ export default function UserDashboard() {
                 <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>
                   Amount ({userCurrency})
                 </label>
-                <input className="input mono" type="number" min="1" required value={addMoneyAmount} onChange={(event) => setAddMoneyAmount(event.target.value)} style={{ width: '100%', fontSize: '1.2rem', padding: '0.75rem 1rem', marginBottom: '1rem' }} />
+                <input className="input mono" type="number" min="1" required value={addMoneyAmount} disabled={!!stripeResumeOrder || addMoneyLoading} onChange={(event) => setAddMoneyAmount(event.target.value)} style={{ width: '100%', fontSize: '1.2rem', padding: '0.75rem 1rem', marginBottom: '1rem' }} />
               </div>
 
               {/* Quick top-up chips */}
@@ -2003,7 +2072,7 @@ export default function UserDashboard() {
                 )}
 
                 {/* ── Stripe UI ── */}
-                {selectedGateway === 'stripe' && (
+                {selectedGateway === 'stripe' && !pendingStripeIntent && (
                   <div style={{ width: '100%', marginBottom: '1.25rem' }}>
                     {stripeLoading && (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1.5rem 0', gap: '0.75rem', color: '#635bff' }}>
