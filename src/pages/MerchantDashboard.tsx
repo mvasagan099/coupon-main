@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import CountrySelector from '../components/CountrySelector';
+import { getCountryByCode } from '../lib/countries';
+import { formatCurrency } from '../lib/exchangeRate';
 import { Rocket, Store, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -8,6 +11,7 @@ import { LoadingPage } from '../components/LoadingPage';
 import type { Company, GiftCard, RedemptionTransaction } from '../lib/supabase';
 import {
   createGiftCard,
+  updateGiftCardCountry,
   deleteGiftCard,
   getCompanyByOwner,
   getGiftCards,
@@ -45,7 +49,8 @@ function createInitialWizardForm() {
     expiryDate: getDefaultExpiryDate(),
     bannerImage: 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60',
     terms: 'Valid at all participating locations. Cannot be exchanged for cash.',
-    issueLimit: ''
+    issueLimit: '',
+    countryCode: ''
   };
 }
 
@@ -194,6 +199,7 @@ export default function MerchantDashboard() {
     event.preventDefault();
     if (!company) return;
 
+    if (!wizardForm.countryCode) { toastError('Country required', 'Select the country allowed to buy and redeem this coupon.'); return; }
     if (wizardStep < 3) {
       setWizardStep(wizardStep + 1);
       return;
@@ -213,6 +219,7 @@ export default function MerchantDashboard() {
 
       const newCard = await createGiftCard({
         company_id: company.id,
+        country_code: wizardForm.countryCode,
         title: wizardForm.title,
         description: wizardForm.description,
         value: valueNum,
@@ -269,6 +276,17 @@ export default function MerchantDashboard() {
   const merchantHasApproval = company?.status === 'approved';
 
 
+  const countryMoney = (amount: number, country?: string | null) => country
+    ? formatCurrency(amount, getCountryByCode(country).currency) : `${amount.toFixed(2)} (country unset)`;
+  const moneySummary = (totals: Record<string, number>) => Object.entries(totals).map(([country, amount]) => countryMoney(amount, country === 'unset' ? null : country)).join(' · ') || '0';
+  const redeemedByCountry = useMemo(() => redemptions.reduce<Record<string, number>>((totals, row) => {
+    const coupon = purchasedCoupons.find(c => c.id === row.coupon_id);
+    const country = coupon?.country_code ?? 'unset'; totals[country] = (totals[country] ?? 0) + row.amount; return totals;
+  }, {}), [redemptions, purchasedCoupons]);
+  const balanceByCountry = useMemo(() => purchasedCoupons.reduce<Record<string, number>>((totals, coupon) => {
+    const country = coupon.country_code ?? 'unset'; totals[country] = (totals[country] ?? 0) + coupon.remaining_balance; return totals;
+  }, {}), [purchasedCoupons]);
+
   const recentOffers = useMemo(() => offers.slice(0, 3), [offers]);
   const recentTransactions = useMemo(() => redemptions.slice(0, 5), [redemptions]);
 
@@ -293,7 +311,7 @@ export default function MerchantDashboard() {
           </div>
 
           <div className="responsive-grid-4">
-            <DashboardCard title="Projected sales" value={`₹${metrics.totalSales.toFixed(0)}`} variant="primary" icon={<span style={{ fontSize: '1rem' }}>₹</span>} />
+            <DashboardCard title="Redeemed value" value={moneySummary(redeemedByCountry)} variant="primary" icon={<span style={{ fontSize: '1rem' }}>₹</span>} />
             <DashboardCard title="Coupons redeemed" value={String(metrics.couponsRedeemed)} variant="emerald" icon={<span style={{ fontSize: '1rem' }}>✓</span>} />
             <DashboardCard title="Active campaigns" value={String(metrics.activeOffers)} variant="violet" icon={<span style={{ fontSize: '1rem' }}>🚀</span>} />
             <DashboardCard title="Current status" value={company?.status || 'Not started'} variant="amber" icon={<span style={{ fontSize: '1rem' }}>⚡</span>} />
@@ -366,7 +384,7 @@ export default function MerchantDashboard() {
                 })()}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.85rem', background: 'rgba(79,99,245,0.04)', borderRadius: '12px', marginTop: '0.25rem', borderTop: '1px solid var(--border)' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.88rem' }}>Outstanding liability</span>
-                  <strong>${Math.max(metrics.liabilities, 0).toFixed(2)}</strong>
+                  <strong>{moneySummary(balanceByCountry)}</strong>
                 </div>
               </div>
             </div>
@@ -430,7 +448,12 @@ export default function MerchantDashboard() {
                     <div key={offer.id} className="glass-card" style={{ borderRadius: '16px', padding: '1rem' }}>
                       <div style={{ fontWeight: 700 }}>{offer.title}</div>
                       <div style={{ color: 'var(--text-3)', marginTop: '0.25rem', fontSize: '0.88rem' }}>
-                        Sell at ${offer.price.toFixed(2)} for 🪙{offer.value.toFixed(2)} of value
+                        <label className="label" htmlFor={`offer-country-${offer.id}`}>Eligible country</label>
+                        <CountrySelector id={`offer-country-${offer.id}`} value={offer.country_code} required onChange={async country => {
+                          try { await updateGiftCardCountry(offer.id, country.code); await fetchMerchantProfile(); success('Country saved', `Only ${country.name} users can purchase new coupons.`); }
+                          catch (error) { toastError('Country update failed', getErrorMessage(error, 'Please retry.')); }
+                        }} />
+                        Sell at {(offer.currency ? formatCurrency(offer.price, offer.currency) : "Set country")} for {(offer.currency ? formatCurrency(offer.value, offer.currency) : offer.value.toFixed(2))} of value
                       </div>
                     </div>
                   ))}
@@ -509,10 +532,25 @@ export default function MerchantDashboard() {
               ))}
             </div>
 
+            {offers.length > 0 && <details className="glass-card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+              <summary>Manage coupon countries ({offers.length})</summary>
+              {offers.map(offer => <div key={offer.id} style={{ marginTop: '1rem' }}>
+                <label className="label" htmlFor={`campaign-country-${offer.id}`}>{offer.title}</label>
+                <CountrySelector id={`campaign-country-${offer.id}`} value={offer.country_code} onChange={async country => {
+                  try { await updateGiftCardCountry(offer.id, country.code); await fetchMerchantProfile(); success('Country saved', 'Country applies to new purchases; issued coupons keep their original country.'); }
+                  catch (error) { toastError('Country update failed', getErrorMessage(error, 'Please retry.')); }
+                }} />
+              </div>)}
+            </details>}
             <form onSubmit={handleCreateCampaign} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
               {wizardStep === 1 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} className="fade-in">
                   <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>Gift card details</h3>
+                  <div className="form-group">
+                    <label className="label" htmlFor="coupon-country">Coupon country (required)</label>
+                    <CountrySelector id="coupon-country" required value={wizardForm.countryCode} onChange={country => setWizardForm({ ...wizardForm, countryCode: country.code })} />
+                    <p>Only users registered in this country can buy and redeem this coupon. Values use its local currency without conversion.</p>
+                  </div>
                   <div>
                     <label className="label">Gift card title</label>
                     <input className="input" required placeholder="Starbucks Premium Brew Card" value={wizardForm.title} onChange={(event) => setWizardForm({ ...wizardForm, title: event.target.value })} />
@@ -536,11 +574,11 @@ export default function MerchantDashboard() {
                   <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>Values and expiry</h3>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                     <div>
-                      <label className="label">Face value (🪙)</label>
+                      <label className="label">Face value ({wizardForm.countryCode ? getCountryByCode(wizardForm.countryCode).currency : "local currency"})</label>
                       <input className="input mono" type="number" required min={1} value={wizardForm.value} onChange={(event) => setWizardForm({ ...wizardForm, value: event.target.value, price: event.target.value })} />
                     </div>
                     <div>
-                      <label className="label">Selling price ($)</label>
+                      <label className="label">Selling price ({wizardForm.countryCode ? getCountryByCode(wizardForm.countryCode).currency : "local currency"})</label>
                       <input className="input mono" type="number" required min={0} value={wizardForm.price} readOnly style={{ backgroundColor: 'var(--bg-3)', opacity: 0.7, cursor: 'not-allowed' }} title="Selling price must match face value" />
                     </div>
                   </div>
@@ -627,11 +665,11 @@ export default function MerchantDashboard() {
                 <div>
                   <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-3)' }}>Selling price</span>
                   <p className="mono" style={{ fontSize: '1.25rem', fontWeight: 900, margin: 0, color: 'var(--cyan)' }}>
-                    ${wizardForm.price || '45'}.00
+                    {formatCurrency(Number(wizardForm.price || 0), wizardForm.countryCode ? getCountryByCode(wizardForm.countryCode).currency : "USD")}
                   </p>
                 </div>
                 <span style={{ background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.3)', padding: '0.35rem 0.75rem', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 800, color: '#4ade80' }}>
-                  Value: 🪙{wizardForm.value || '50'}
+                  Value: {formatCurrency(Number(wizardForm.value || 0), wizardForm.countryCode ? getCountryByCode(wizardForm.countryCode).currency : "USD")}
                 </span>
               </div>
             </div>
@@ -649,7 +687,7 @@ export default function MerchantDashboard() {
                         <div style={{ fontWeight: 700 }}>{offer.title}</div>
                         <div style={{ color: 'var(--text-3)', marginTop: '0.25rem' }}>{offer.description}</div>
                         <div style={{ fontSize: '0.82rem', fontFamily: 'monospace', opacity: 0.8, marginTop: '0.5rem' }}>
-                          <span style={{ color: 'var(--text-3)' }}>Price:</span> ${offer.price.toFixed(2)} <span style={{ margin: '0 0.5rem', color: 'var(--border)' }}>|</span> <span style={{ color: 'var(--text-3)' }}>Value:</span> 🪙{offer.value.toFixed(2)}
+                          <span style={{ color: 'var(--text-3)' }}>Price:</span> {offer.currency ? formatCurrency(offer.price, offer.currency) : "Set country"} <span style={{ margin: '0 0.5rem', color: 'var(--border)' }}>|</span> <span style={{ color: 'var(--text-3)' }}>Value:</span> {offer.currency ? formatCurrency(offer.value, offer.currency) : offer.value.toFixed(2)}
                         </div>
                         <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--text-3)' }}>
                           {offer.issue_limit ? (
@@ -717,7 +755,7 @@ export default function MerchantDashboard() {
                             {c.status}
                           </span>
                         </td>
-                        <td className="mono">₹{c.remaining_balance.toFixed(2)}</td>
+                        <td className="mono">{countryMoney(c.remaining_balance, c.country_code)}</td>
                         <td style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-1)' }}>
                           {c.issued_to ? (
                             c.issued_to === 'usr_101' ? 'customer@demo.com' : `Customer (${c.issued_to.substring(0, 8)})`
@@ -788,9 +826,9 @@ export default function MerchantDashboard() {
                             {userName !== 'anonymous' ? userName : <span style={{ color: 'var(--text-4)', fontStyle: 'italic' }}>Anonymous</span>}
                           </td>
                           <td className="mono" style={{ fontWeight: 700 }}>{redemption.coupon_code || 'COUPON'}</td>
-                          <td className="mono" style={{ color: 'var(--text-3)' }}>₹{priorBalance.toFixed(2)}</td>
-                          <td className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>-₹{redemption.amount.toFixed(2)}</td>
-                          <td className="mono">₹{redemption.remaining_balance_after.toFixed(2)}</td>
+                          <td className="mono" style={{ color: 'var(--text-3)' }}>{countryMoney(priorBalance, coupon?.country_code)}</td>
+                          <td className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>-{countryMoney(redemption.amount, coupon?.country_code)}</td>
+                          <td className="mono">{countryMoney(redemption.remaining_balance_after, coupon?.country_code)}</td>
                           <td className="mono" style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
                             {new Date(redemption.created_at).toLocaleString()}
                           </td>
@@ -1004,7 +1042,7 @@ export default function MerchantDashboard() {
                       <tr key={s.id}>
                         <td style={{ fontWeight: 600, color: 'var(--text-1)' }}>{s.period_month}</td>
                         <td style={{ textAlign: 'right', color: 'var(--text-3)' }}>{s.total_redemptions}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--violet-400)' }}>₹{s.amount_due.toFixed(2)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--violet-400)' }}>{s.currency ? formatCurrency(s.amount_due, s.currency) : `${s.amount_due.toFixed(2)} (currency unset)`}</td>
                         <td>
                           <span className={`badge ${s.status === 'paid' ? 'badge-green' : 'badge-amber'}`}>
                             {s.status.toUpperCase()}

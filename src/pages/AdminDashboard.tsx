@@ -32,7 +32,7 @@ import {
 } from '../lib/supabase';
 
 import { COUNTRIES, getCountryByCode } from '../lib/countries';
-import { getRate, formatCurrency } from '../lib/exchangeRate';
+import { formatCurrency } from '../lib/exchangeRate';
 
 const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts', 'support', 'rates'] as const;
 type AdminSection = (typeof validSections)[number];
@@ -102,7 +102,6 @@ export default function AdminDashboard() {
   const [payoutMethodFilter, setPayoutMethodFilter]   = useState<'all' | 'paypal' | 'bank'>('all');
   const [payoutStatusFilter, setPayoutStatusFilter]   = useState<'all' | 'pending' | 'completed' | 'rejected'>('pending');
   const [payoutSearch, setPayoutSearch]               = useState<string>('');
-  const [exchangeRates, setExchangeRates]             = useState<Record<string, number>>({});
 
   // Support ticket state
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
@@ -244,26 +243,6 @@ export default function AdminDashboard() {
       setSupportLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    if (withdrawals.length === 0) return;
-    const currencies = Array.from(new Set(withdrawals.map(w => w.currency ?? 'USD')));
-    
-    const fetchRates = async () => {
-      const rateMap: Record<string, number> = { USD: 1 };
-      for (const cur of currencies) {
-        if (cur && cur !== 'USD') {
-          try {
-            rateMap[cur] = await getRate('USD', cur);
-          } catch {
-            rateMap[cur] = 1;
-          }
-        }
-      }
-      setExchangeRates(rateMap);
-    };
-    void fetchRates();
-  }, [withdrawals]);
 
   const availableCountries = useMemo(() => {
     const codes = Array.from(new Set(withdrawals.map(w => w.country_code).filter(Boolean))) as string[];
@@ -1279,7 +1258,7 @@ export default function AdminDashboard() {
                         <td style={{ fontWeight: 600, color: 'var(--text-1)' }}>{settlement.period_month}</td>
                         <td style={{ color: 'var(--text-2)' }}>{settlement.company?.name || 'Unknown'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--text-3)' }}>{settlement.total_redemptions}</td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--violet-400)' }}>₹{settlement.amount_due.toFixed(2)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--violet-400)' }}>{settlement.currency ? formatCurrency(settlement.amount_due, settlement.currency) : `${settlement.amount_due.toFixed(2)} (currency unset)`}</td>
                         <td>
                           <span className={`badge ${settlement.status === 'paid' ? 'badge-green' : 'badge-amber'}`}>
                             {settlement.status.toUpperCase()}
@@ -1396,8 +1375,6 @@ export default function AdminDashboard() {
                     {filteredWithdrawals.map((w) => {
                       const countryInfo = getCountryByCode(w.country_code ?? 'US');
                       const currency = w.currency ?? countryInfo.currency ?? 'USD';
-                      const rate = exchangeRates[currency] ?? 1;
-                      const convertedAmount = w.amount * rate;
                       const isBank = w.routing_number && w.routing_number !== 'PAYPAL';
 
                       return (
@@ -1417,13 +1394,8 @@ export default function AdminDashboard() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <div style={{ fontWeight: 700, color: 'var(--violet-400)', fontSize: '1rem' }}>
-                              {currency !== 'USD' ? formatCurrency(convertedAmount, currency) : `$${w.amount.toFixed(2)}`}
+                              {formatCurrency(w.amount, currency)}
                             </div>
-                            {currency !== 'USD' && (
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', fontWeight: 500 }}>
-                                (${w.amount.toFixed(2)} USD)
-                              </div>
-                            )}
                           </td>
                           <td style={{ color: 'var(--text-2)', fontSize: '0.9rem' }}>
                             {!isBank ? (
@@ -1457,7 +1429,7 @@ export default function AdminDashboard() {
                                   onClick={() => setConfirmModal({
                                     show: true,
                                     title: 'Confirm Payout Completion',
-                                    message: `Are you sure you want to mark the withdrawal of ${currency !== 'USD' ? formatCurrency(convertedAmount, currency) : `$${w.amount.toFixed(2)}`} ($${w.amount.toFixed(2)} USD) for ${w.email} as COMPLETED? Make sure you have manually sent the funds first.`,
+                                    message: `Are you sure you want to mark the withdrawal of ${formatCurrency(w.amount, currency)} for ${w.email} as COMPLETED? Make sure you have manually sent the funds first.`,
                                     actionType: 'approve',
                                     withdrawalId: w.id,
                                     amount: w.amount,
@@ -1472,7 +1444,7 @@ export default function AdminDashboard() {
                                   onClick={() => setConfirmModal({
                                     show: true,
                                     title: 'Reject Payout Request',
-                                    message: `Are you sure you want to REJECT the withdrawal of ${currency !== 'USD' ? formatCurrency(convertedAmount, currency) : `$${w.amount.toFixed(2)}`} ($${w.amount.toFixed(2)} USD) for ${w.email}? This will automatically refund the money back into their wallet balance.`,
+                                    message: `Are you sure you want to REJECT the withdrawal of ${formatCurrency(w.amount, currency)} for ${w.email}? This will automatically refund the money back into their wallet balance.`,
                                     actionType: 'reject',
                                     withdrawalId: w.id,
                                     amount: w.amount,

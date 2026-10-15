@@ -83,6 +83,8 @@ export interface GiftCard {
   id: string;
   company_id: string;
   company_name?: string;
+  country_code?: string | null;
+  currency?: string | null;
   title: string;
   description: string;
   value: number;
@@ -172,6 +174,7 @@ export interface Settlement {
   id: string;
   company_id: string;
   period_month: string;
+  currency?: string | null;
   total_redemptions: number;
   amount_due: number;
   status: 'pending' | 'paid';
@@ -449,7 +452,7 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
       const deduped: GiftCard[] = [];
 
       for (const card of remoteCards) {
-        const titleKey = `${card.company_id || ""}::${(card.title || "").trim().toLowerCase()}`;
+        const titleKey = `${card.company_id || ""}::${card.country_code || "unassigned"}::${(card.title || "").trim().toLowerCase()}`;
         if (!seenIds.has(card.id) && !seenKeys.has(titleKey)) {
           seenIds.add(card.id);
           seenKeys.add(titleKey);
@@ -466,7 +469,7 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     const dedupedLocal: GiftCard[] = [];
 
     for (const card of localFiltered) {
-      const titleKey = `${card.company_id || ""}::${(card.title || "").trim().toLowerCase()}`;
+      const titleKey = `${card.company_id || ""}::${card.country_code || "unassigned"}::${(card.title || "").trim().toLowerCase()}`;
       if (!seenLocal.has(card.id) && !seenLocal.has(titleKey)) {
         seenLocal.add(card.id);
         seenLocal.add(titleKey);
@@ -488,7 +491,7 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     const seen = new Set<string>();
     const deduped: GiftCard[] = [];
     for (const c of filtered) {
-      const key = `${c.company_id || ""}::${(c.title || "").trim().toLowerCase()}`;
+      const key = `${c.company_id || ""}::${c.country_code || "unassigned"}::${(c.title || "").trim().toLowerCase()}`;
       if (!seen.has(c.id) && !seen.has(key)) {
         seen.add(c.id);
         seen.add(key);
@@ -512,6 +515,11 @@ export async function createGiftCard(giftCardData: Omit<GiftCard, 'id' | 'create
     .single();
   if (error) throw error;
   return data;
+}
+
+export async function updateGiftCardCountry(id: string, countryCode: string): Promise<void> {
+  const { data, error } = await supabase.from('gift_cards').update({ country_code: countryCode }).eq('id', id).select('id').single();
+  if (error || !data) throw error ?? new Error('Coupon country was not saved.');
 }
 
 export async function deleteGiftCard(id: string): Promise<void> {

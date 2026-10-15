@@ -10,7 +10,7 @@ Deno.serve(async (req: Request) => {
       .eq('gateway', 'paypal').eq('gateway_order_id', orderId).eq('user_id', user.id).maybeSingle();
     if (error) throw new Error('Payment records are unavailable. Retry verification.');
     if (!stored) throw new Error('Order does not belong to this account.');
-    if (stored.status === 'paid') return json(req, { verified: true, amount: Number(stored.amount_usd), alreadyCredited: true });
+    if (stored.status === 'paid') return json(req, { verified: true, amount: Number(stored.amount_major), alreadyCredited: true });
     let order = await paypal(`/v2/checkout/orders/${encodeURIComponent(orderId)}`);
     const unit = order.purchase_units?.[0];
     if (order.purchase_units?.length !== 1 || Number(unit?.amount?.value) !== Number(stored.amount_major) ||
@@ -27,6 +27,6 @@ Deno.serve(async (req: Request) => {
       p_transaction_id: stored.id, p_capture_id: capture.id, p_amount: Number(capture.amount.value), p_currency: capture.amount.currency_code,
     });
     if (creditError || !settlement) throw new Error('Payment received; wallet credit is pending. Retry verification with the same order.');
-    return json(req, { verified: true, amount: Number(stored.amount_usd), ...settlement });
+    return json(req, { verified: true, amount: Number(stored.amount_major), ...settlement });
   } catch (error) { return failure(req, error); }
 });

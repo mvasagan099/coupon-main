@@ -554,9 +554,10 @@ app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (re
     if (typeof effectiveCurrency !== 'string' || !/^[A-Z]{3}$/.test(effectiveCurrency)) {
       return res.status(400).json({ success: false, message: 'Invalid currency.' });
     }
-    const converted = await exchangeRateService.convertToUSD(amount, effectiveCurrency);
-    const exchangeRate = converted.rate;
-    const amountUSD = converted.amountUSD;
+    const { data: profile, error: profileError } = await supabase.from('profiles').select('country_code,currency').eq('id', userId).single();
+    if (profileError || !profile?.country_code || profile.currency !== effectiveCurrency) {
+      return res.status(400).json({ success: false, message: 'Payment currency must match your account country.' });
+    }
 
     const service = getGatewayService(gateway);
     const result = await service.createPayment(amount, effectiveCurrency, receiptId);
@@ -564,7 +565,7 @@ app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (re
     const { error: orderError } = await supabase.from('payment_transactions').insert({
       user_id: userId, gateway, gateway_order_id: result.gatewayOrderId,
       amount_major: amount, currency: effectiveCurrency, status: 'pending',
-      idempotency_key: receiptId, exchange_rate: exchangeRate, amount_usd: amountUSD, amount_local: amount,
+      idempotency_key: receiptId, exchange_rate: null, amount_usd: effectiveCurrency === 'USD' ? amount : null, amount_local: amount, wallet_amount: amount,
     });
     if (orderError) throw new Error('Could not save the payment order. No payment has been charged.');
 
@@ -576,8 +577,7 @@ app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (re
       amount: result.amountMinorUnit,
       currency: result.currency,
       receiptId,
-      exchangeRate,
-      amountUSD,
+      walletAmount: amount,
     });
   } catch (err: any) {
     console.error('[/payments/create]', err);

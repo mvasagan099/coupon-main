@@ -19,9 +19,9 @@ test('persisted locks reject otherwise valid sessions',async()=>{
  assert.equal((await authenticate('Bearer valid',{id:'u'},false)).code,403);
  assert.equal((await authenticate('Bearer valid',{id:'u'},true)).next,true);
 });
-function paymentClient(owner='owner') {
+function paymentClient(owner='owner',currency='USD',amount=10) {
  let settlements=0;
- const row={id:'transaction',user_id:owner,currency:'USD',amount_major:10,amount_usd:10,exchange_rate:1};
+ const row={id:'transaction',user_id:owner,currency,amount_major:amount,amount_usd:currency==='USD'?amount:1,exchange_rate:0.0125};
  const query:any={select:()=>query,eq:()=>query,maybeSingle:async()=>({data:row,error:null})};
  return {client:{from:()=>query,rpc:async()=>{settlements++;return {data:{alreadyCredited:false},error:null};}},count:()=>settlements};
 }
@@ -43,4 +43,12 @@ test('unverified capture, wrong amount and wrong currency never credit a wallet'
 test('failed atomic settlement never reports a completed credit',async()=>{
  const mock=paymentClient(); mock.client.rpc=async()=>({data:null,error:new Error('DB unavailable')}) as any;
  await assert.rejects(settlePayment(mock.client as any,'paypal','order','owner',{verified:true,amount:10,currency:'USD',gatewayPaymentId:'capture'}),/pending/);
+});
+
+test('INR verification returns nominal wallet units and never the old USD quote',async()=>{
+ const mock=paymentClient('owner','INR',80);
+ const result=await settlePayment(mock.client as any,'razorpay','order','owner',{verified:true,amount:80,currency:'INR',gatewayPaymentId:'capture'});
+ assert.equal(result.amount,80);
+ assert.equal(result.currency,'INR');
+ assert.equal(mock.count(),1);
 });

@@ -8,8 +8,8 @@ INSERT INTO auth.users(id,email,raw_user_meta_data,raw_app_meta_data) VALUES
 UPDATE public.profiles SET wallet_balance=200 WHERE id='00000000-0000-0000-0000-000000000001';
 INSERT INTO public.companies(id,name,prefix,coupon_limit,status,owner_id,account_number,pan)
 VALUES('10000000-0000-0000-0000-000000000001','Test merchant','TST',100,'approved','00000000-0000-0000-0000-000000000003','private-bank','private-pan');
-INSERT INTO public.gift_cards(id,company_id,title,price,value,is_active)
-VALUES('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','Test card',80,100,true);
+INSERT INTO public.gift_cards(id,company_id,title,price,value,is_active,country_code)
+VALUES('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','Test card',80,100,true,'US');
 SELECT set_config('request.jwt.claims','{"sub":"00000000-0000-0000-0000-000000000001","role":"authenticated","app_metadata":{}}',true);
 SET LOCAL ROLE authenticated;
 DO $$ DECLARE result record; BEGIN
@@ -28,14 +28,14 @@ DO $$ DECLARE result record; BEGIN
  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 RESET ROLE;
--- Withdrawal conversion is server-authoritative and reserves the exact USD amount.
+-- Withdrawal reserves the nominal amount in the account currency.
 INSERT INTO public.exchange_rates(base_currency,target_currency,rate,updated_at)
 VALUES('USD','INR',80,now()) ON CONFLICT(base_currency,target_currency) DO UPDATE SET rate=80,updated_at=now();
 SET LOCAL ROLE authenticated;
 DO $$ DECLARE w jsonb; BEGIN
- w:=public.request_withdrawal(800,'INR','routing','account');
+ w:=public.request_withdrawal(10,'USD','routing','account');
  IF (w->>'amount')::numeric<>10 OR (SELECT wallet_balance FROM public.profiles WHERE id=auth.uid())<>110 THEN
-  RAISE EXCEPTION 'Withdrawal FX/reservation mismatch'; END IF;
+  RAISE EXCEPTION 'Withdrawal reservation mismatch'; END IF;
  BEGIN
   PERFORM public.request_withdrawal(1,'XXX','routing','account');
   RAISE EXCEPTION 'Unknown currency accepted';

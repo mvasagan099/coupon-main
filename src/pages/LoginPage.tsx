@@ -135,7 +135,7 @@ export function LoginPage() {
     try {
       if (isSignUp) {
         // Country is required for new user registrations
-        if (isUserRoute && !selectedCountry) {
+        if (!selectedCountry) {
           setMessage({ type: 'error', text: 'Please select your country to continue.' });
           setLoading(false);
           return;
@@ -356,7 +356,7 @@ export function LoginPage() {
             </div>
 
             {/* Country selector — shown only in sign-up mode for users */}
-            {isSignUp && isUserRoute && (
+            {isSignUp && (
               <div>
                 <label className="label" htmlFor="country-selector">
                   Country <span style={{ color: 'var(--red)' }}>*</span>

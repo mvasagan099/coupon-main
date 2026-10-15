@@ -35,7 +35,7 @@ import {
 import CountrySelector from '../components/CountrySelector';
 import type { CountryInfo } from '../lib/countries';
 import { getCountryByCode, getCountryBankConfig } from '../lib/countries';
-import { convertFromUSD, formatCurrency, getRate } from '../lib/exchangeRate';
+import { formatCurrency } from '../lib/exchangeRate';
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
 type UserSection = (typeof validSections)[number];
@@ -121,24 +121,6 @@ export default function UserDashboard() {
   const [userCurrency, setUserCurrency]       = useState<string>('USD');
   const [profileCountry, setProfileCountry]   = useState<CountryInfo | null>(null);
   const [savingProfile, setSavingProfile]     = useState(false);
-  const [userFxRate, setUserFxRate]           = useState<number>(0);
-  const [convertedWalletBalance, setConvertedWalletBalance] = useState<{ amount: number; formatted: string } | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try {
-        const rate = await getRate('USD', userCurrency);
-        const converted = await convertFromUSD(walletBalance, userCurrency);
-        if (active) { setUserFxRate(rate); setConvertedWalletBalance(converted); }
-      } catch {
-        if (active) { setUserFxRate(0); setConvertedWalletBalance(null); }
-      }
-    };
-    void load();
-    return () => { active = false; };
-  }, [walletBalance, userCurrency]);
-
   const [selectedProduct, setSelectedProduct] = useState<GiftCard | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState(false);
@@ -171,7 +153,8 @@ export default function UserDashboard() {
         // Load country / currency
         if (profile.country_code) {
           setUserCountryCode(profile.country_code);
-          setUserCurrency(profile.currency ?? getCountryByCode(profile.country_code).currency);
+          setUserCurrency(getCountryByCode(profile.country_code).currency);
+          setSelectedGateway(getCountryByCode(profile.country_code).gatewayPriority.find(gateway => gateway !== 'paypal' || !['INR', 'AED'].includes(getCountryByCode(profile.country_code!).currency)) ?? 'stripe');
           setProfileCountry(getCountryByCode(profile.country_code));
         }
       } catch (err) {
@@ -279,6 +262,7 @@ export default function UserDashboard() {
   const handleConfirmWalletPayment = async () => {
     if (!selectedProduct || !user) return;
 
+    if (!userCountryCode || selectedProduct.country_code !== userCountryCode) { toastError('Country restricted', 'This coupon is only available in its selected country.'); return; }
     if (walletBalance < selectedProduct.price) {
       toastError('Insufficient funds', 'Your wallet balance is lower than the purchase price.');
       return;
@@ -356,9 +340,9 @@ export default function UserDashboard() {
       if (verify.verified) {
         await refreshWalletBalance();
         await loadData();
-        const creditedUSD = verify.amount ?? (amountNum / 83.5);
-        const paidLocal   = verify.amountLocal ?? amountNum;
-        success('Funds added', `Successfully added $${creditedUSD.toFixed(2)} USD to your wallet (Paid ₹${paidLocal.toFixed(2)} INR).`);
+        const creditedAmount = verify.amount;
+        if (!verify.verified || !Number.isFinite(creditedAmount)) throw new Error("Payment credit was not confirmed.");
+        success('Funds added', `Successfully added ${formatCurrency(creditedAmount!, userCurrency)} to your wallet.`);
         setShowAddMoneyModal(false);
         setAddMoneyAmount('500');
       } else {
@@ -399,7 +383,7 @@ export default function UserDashboard() {
         const container = document.getElementById('stripe-payment-element');
         if (container) container.innerHTML = '';
 
-        const orderData = await createPayment('stripe', amountNum, 'USD');
+        const orderData = await createPayment('stripe', amountNum, userCurrency);
         if (!active) return;
         if (!orderData.clientSecret) {
           throw new Error('Stripe client secret not received.');
@@ -434,7 +418,7 @@ export default function UserDashboard() {
       const el = document.getElementById('stripe-payment-element');
       if (el) el.innerHTML = '';
     };
-  }, [showAddMoneyModal, selectedGateway, addMoneyAmount, toastError]);
+  }, [showAddMoneyModal, selectedGateway, addMoneyAmount, toastError, userCurrency]);
 
   // ── Stripe payment handler ───────────────────────────────────────────────────
   const handleStripePayment = async () => {
@@ -496,11 +480,10 @@ export default function UserDashboard() {
     event.preventDefault();
     if (!user?.id) return;
     const enteredAmount = parseFloat(withdrawForm.amount);
-    if (userCurrency !== 'USD' && !userFxRate) { toastError('Exchange rate unavailable', 'Please retry later.'); return; }
-    const maxLocal = userCurrency !== 'USD' ? walletBalance * userFxRate : walletBalance;
+    const maxLocal = walletBalance;
 
     if (isNaN(enteredAmount) || enteredAmount <= 0 || enteredAmount > maxLocal + 0.01) {
-      toastError('Invalid amount', `Enter an amount up to ${userCurrency !== 'USD' ? formatCurrency(maxLocal, userCurrency) : `$${walletBalance.toFixed(2)}`}.`);
+      toastError('Invalid amount', `Enter an amount up to ${formatCurrency(maxLocal, userCurrency)}.`);
       return;
     }
     if (withdrawMethod === 'paypal') {
@@ -521,8 +504,6 @@ export default function UserDashboard() {
   const handleWithdrawalConfirm = async () => {
     if (!user?.id) return;
     const enteredAmount = parseFloat(withdrawForm.amount);
-    if (userCurrency !== 'USD' && !userFxRate) { toastError('Exchange rate unavailable', 'Please retry once a current rate is available.'); return; }
-    const amountUSD = userCurrency !== 'USD' ? enteredAmount / userFxRate : enteredAmount;
 
     setWithdrawLoading(true);
     setWithdrawStep(2); // Go to processing view
@@ -554,7 +535,7 @@ export default function UserDashboard() {
         'Payout requested',
         withdrawMethod === 'paypal'
           ? `PayPal Payout requested successfully.`
-          : `Bank transfer of ${userCurrency !== 'USD' ? formatCurrency(enteredAmount, userCurrency) : `$${amountUSD.toFixed(2)}`} to ${withdrawForm.bankName} requested successfully.`
+          : `Bank transfer of ${formatCurrency(enteredAmount, userCurrency)} to ${withdrawForm.bankName} requested successfully.`
       );
     } catch (err: unknown) {
       setWithdrawStep(1); // Return to form on error
@@ -575,7 +556,7 @@ export default function UserDashboard() {
         date: order.created_at,
         brand: order.company?.name || 'Marketplace purchase',
         type: 'Purchase',
-        amount: `-${(userFxRate ? formatCurrency(order.amount * userFxRate, userCurrency) : formatCurrency(order.amount, 'USD'))}`,
+        amount: `-${formatCurrency(order.amount, userCurrency)}`,
         status: 'Completed',
       });
     });
@@ -585,7 +566,7 @@ export default function UserDashboard() {
         date: redemption.created_at,
         brand: redemption.company_name || 'Merchant',
         type: 'Redemption',
-        amount: `-${(userFxRate ? formatCurrency(redemption.amount * userFxRate, userCurrency) : formatCurrency(redemption.amount, 'USD'))}`,
+        amount: `-${formatCurrency(redemption.amount, userCurrency)}`,
         status: 'Settled',
       });
     });
@@ -595,7 +576,7 @@ export default function UserDashboard() {
         date: deposit.created_at,
         brand: cleanPaymentMethod(deposit.payment_method),
         type: 'Deposit',
-        amount: `+${(userFxRate ? formatCurrency(deposit.amount * userFxRate, userCurrency) : formatCurrency(deposit.amount, 'USD'))}`,
+        amount: `+${formatCurrency(deposit.amount, userCurrency)}`,
         status: deposit.status === 'completed' ? 'Completed' : 'Pending',
       });
     });
@@ -605,7 +586,7 @@ export default function UserDashboard() {
         date: w.created_at,
         brand: `Payout (${w.account_number ? '...' + w.account_number.slice(-4) : 'Bank'})`,
         type: 'Withdrawal',
-        amount: `-${(userFxRate ? formatCurrency(w.amount * userFxRate, userCurrency) : formatCurrency(w.amount, 'USD'))}`,
+        amount: `-${formatCurrency(w.amount, userCurrency)}`,
         status: w.status === 'completed' ? 'Completed' : w.status === 'rejected' ? 'Rejected' : 'Pending',
       });
 
@@ -614,14 +595,14 @@ export default function UserDashboard() {
           date: w.updated_at || w.created_at,
           brand: `Refund (Rejected Payout)`,
           type: 'Refund',
-          amount: `+${(userFxRate ? formatCurrency(w.amount * userFxRate, userCurrency) : formatCurrency(w.amount, 'USD'))}`,
+          amount: `+${formatCurrency(w.amount, userCurrency)}`,
           status: 'Completed',
         });
       }
     });
 
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [orders, redemptions, deposits, withdrawals, userCurrency, userFxRate]);
+  }, [orders, redemptions, deposits, withdrawals, userCurrency]);
 
   const filteredCatalog = useMemo(() => {
     return giftCards.filter((card) => {
@@ -634,9 +615,9 @@ export default function UserDashboard() {
       else if (priceFilter === 'mid') matchesPrice = card.price >= 500 && card.price <= 2000;
       else if (priceFilter === 'high') matchesPrice = card.price > 2000;
 
-      return matchesSearch && matchesPrice;
+      return !!userCountryCode && card.country_code === userCountryCode && matchesSearch && matchesPrice;
     });
-  }, [catalogSearch, giftCards, priceFilter]);
+  }, [catalogSearch, giftCards, priceFilter, userCountryCode]);
 
   const totalDepositPages = Math.ceil(deposits.length / ITEMS_PER_PAGE);
   const slicedDeposits = deposits.slice(
@@ -679,7 +660,7 @@ export default function UserDashboard() {
       const gc = giftCards.find(card => card.id === voucher.gift_card_id);
       const faceValue = gc ? gc.value : (voucher.status === 'redeemed' || voucher.is_used ? (voucher.remaining_balance || 50) : (voucher.remaining_balance ?? 0));
       const remaining = voucher.remaining_balance ?? 0;
-      
+
       if (voucher.is_used || voucher.status === 'redeemed') {
         return acc + faceValue;
       }
@@ -690,7 +671,7 @@ export default function UserDashboard() {
   }, [userVouchers, giftCards, redemptions]);
 
   return (
-    <PayPalScriptProvider options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: "USD", intent: "capture" }}>
+    <PayPalScriptProvider key={userCurrency} deferLoading={!userCountryCode || ["INR", "AED"].includes(userCurrency)} options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: userCurrency, intent: "capture" }}>
       <div className="dashboard-container">
 
       {currentSection === 'marketplace' && (
@@ -708,9 +689,9 @@ export default function UserDashboard() {
             </div>
             <select className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => { setPriceFilter(event.target.value); setMarketplacePage(1); }}>
               <option value="All">All prices</option>
-              <option value="low">Under $500</option>
-              <option value="mid">$500 - $2000</option>
-              <option value="high">Over $2000</option>
+              <option value="low">Under 500</option>
+              <option value="mid">500 - 2000</option>
+              <option value="high">Over 2000</option>
             </select>
           </div>
 
@@ -766,14 +747,14 @@ export default function UserDashboard() {
                           overflow: 'hidden',
                         }}
                       >
-                        <div 
-                          className="marketplace-card-img" 
-                          style={{ 
-                            position: 'absolute', 
-                            inset: 0, 
-                            background: `url(${(!card.banner_image || card.banner_image.includes('localhost') || card.banner_image.includes('127.0.0.1')) ? 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60' : card.banner_image}) center/cover`, 
-                            zIndex: 0 
-                          }} 
+                        <div
+                          className="marketplace-card-img"
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: `url(${(!card.banner_image || card.banner_image.includes('localhost') || card.banner_image.includes('127.0.0.1')) ? 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60' : card.banner_image}) center/cover`,
+                            zIndex: 0
+                          }}
                         />
                         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, rgba(25,28,29,0.55), rgba(25,28,29,0.85))', zIndex: 1 }} />
                         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 50%)', pointerEvents: 'none', borderRadius: '24px', zIndex: 2 }} />
@@ -785,14 +766,14 @@ export default function UserDashboard() {
                         <div style={{ position: 'relative', zIndex: 3 }}>
                           <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
                           <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                            <Zap size={14} /> {userCurrency !== 'USD' ? `${(userFxRate ? formatCurrency(prc * userFxRate, userCurrency) : formatCurrency(prc, 'USD'))} now` : `$${prc.toFixed(2)} now`}, value 🪙{val.toFixed(2)}
+                            <Zap size={14} /> {formatCurrency(prc, userCurrency)} now, value {formatCurrency(val, userCurrency)}
                           </div>
                         </div>
                       </div>
 
                       <div style={{ padding: '1rem 0.35rem 0 0.35rem' }}>
                         <p style={{ margin: '0 0 0.85rem', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.88rem' }}>{card.description}</p>
-                        
+
                         {card.issue_limit ? (() => {
                           const userPurchasedCount = userVouchers.filter(v => v.gift_card_id === card.id).length;
                           const totalIssued = Math.max(card.issued_count || 0, userPurchasedCount);
@@ -803,8 +784,8 @@ export default function UserDashboard() {
                               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isSoldOut ? 'var(--red)' : 'var(--amber)' }}>
                                 {isSoldOut ? 'Sold out!' : `Only ${remaining} left`}
                               </span>
-                              <button 
-                                className={`btn ${isSoldOut ? 'btn-secondary' : 'btn-primary'} btn-sm`} 
+                              <button
+                                className={`btn ${isSoldOut ? 'btn-secondary' : 'btn-primary'} btn-sm`}
                                 disabled={isSoldOut}
                                 onClick={() => handleInitiatePurchase(card)}
                               >
@@ -879,8 +860,8 @@ export default function UserDashboard() {
           <div className="bento-grid fade-in-cards" style={{ marginBottom: '2rem' }}>
             <DashboardCard
               title="Wallet balance"
-              value={userCurrency !== 'USD' ? (convertedWalletBalance?.formatted ?? (userFxRate ? (userFxRate ? formatCurrency(walletBalance * userFxRate, userCurrency) : formatCurrency(walletBalance, 'USD')) : 'Exchange rate unavailable')) : `$${walletBalance.toFixed(2)}`}
-              subValue={userCurrency !== 'USD' ? `Base: $${walletBalance.toFixed(2)} USD` : undefined}
+              value={formatCurrency(walletBalance, userCurrency)}
+
               variant="primary"
               icon={<Wallet size={20} />}
             />
@@ -888,7 +869,7 @@ export default function UserDashboard() {
             <DashboardCard title="Transactions" value={String(combinedTransactions.length)} variant="violet" icon={<ArrowLeftRight size={20} />} />
             <DashboardCard
               title="Redeemed value"
-              value={userCurrency !== 'USD' ? (userFxRate ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : formatCurrency(totalRedeemedAmount, 'USD')) : `$${totalRedeemedAmount.toFixed(2)}`}
+              value={formatCurrency(totalRedeemedAmount, userCurrency)}
               variant="amber"
               icon={<Gift size={20} />}
             />
@@ -911,7 +892,7 @@ export default function UserDashboard() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-1)' }}>Complete your profile</div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: '0.15rem' }}>
-                  Select your country to get local currency pricing and region-specific payment methods.
+                  Select your country to get country-specific coupons and payment methods.
                 </div>
               </div>
               <button
@@ -937,9 +918,7 @@ export default function UserDashboard() {
                   <span className="glow-dot" />
                 </div>
                 <div style={{ fontSize: '2.8rem', fontWeight: 800, letterSpacing: '0.02em', wordSpacing: '0.08em', lineHeight: 1 }}>
-                  {userCurrency !== 'USD'
-                    ? (convertedWalletBalance?.formatted ?? (userFxRate ? (userFxRate ? formatCurrency(walletBalance * userFxRate, userCurrency) : formatCurrency(walletBalance, 'USD')) : 'Exchange rate unavailable'))
-                    : `$${walletBalance.toFixed(2)}`}
+                  {formatCurrency(walletBalance, userCurrency)}
                 </div>
                 {userCurrency !== 'USD' && (
                   <div style={{
@@ -957,7 +936,7 @@ export default function UserDashboard() {
                     border: '1px solid rgba(255,255,255,0.22)',
                   }}>
                     <span>🌍</span>
-                    <span>${walletBalance.toFixed(2)} USD</span>
+                    <span>{profileCountry?.name} · {userCurrency}</span>
                   </div>
                 )}
                 <p style={{ color: 'rgba(255,255,255,0.75)', lineHeight: 1.6, marginTop: '0.75rem', fontSize: '0.92rem' }}>
@@ -992,7 +971,7 @@ export default function UserDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Redeemed amount</span>
                   <strong style={{ fontSize: '1.1rem' }}>
-                    {userCurrency !== 'USD' ? (userFxRate ? formatCurrency(totalRedeemedAmount * userFxRate, userCurrency) : formatCurrency(totalRedeemedAmount, 'USD')) : `$${totalRedeemedAmount.toFixed(2)}`}
+                    {formatCurrency(totalRedeemedAmount, userCurrency)}
                   </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.4)', borderRadius: '14px' }}>
@@ -1032,7 +1011,7 @@ export default function UserDashboard() {
                         <td style={{ fontWeight: 600 }}>{cleanPaymentMethod(d.payment_method)}</td>
                         <td className="mono text-muted" style={{ fontSize: '0.8rem' }}>{d.reference_id || d.id.slice(0, 10)}</td>
                         <td className="mono font-medium" style={{ color: 'var(--secondary)' }}>
-                          +{(userFxRate ? formatCurrency(d.amount * userFxRate, userCurrency) : formatCurrency(d.amount, 'USD'))}
+                          +{formatCurrency(d.amount, userCurrency)}
                         </td>
                         <td>
                           <span className={`badge ${d.status === 'completed' ? 'badge-green' : d.status === 'failed' ? 'badge-red' : 'badge-amber'}`}>
@@ -1092,7 +1071,7 @@ export default function UserDashboard() {
                       return (
                         <tr key={w.id}>
                           <td className="mono" style={{ fontSize: '0.82rem' }}>{new Date(w.created_at).toLocaleString()}</td>
-                          <td className="mono font-medium">{(userFxRate ? formatCurrency(w.amount * userFxRate, userCurrency) : formatCurrency(w.amount, 'USD'))}</td>
+                          <td className="mono font-medium">{formatCurrency(w.amount, userCurrency)}</td>
                           <td>
                             <span className={`badge ${w.status === 'completed' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-amber'}`}>
                               {w.status.charAt(0).toUpperCase() + w.status.slice(1)}
@@ -1428,7 +1407,7 @@ export default function UserDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.35)' }}>
                             <div>
                               <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>🪙{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>{formatCurrency(voucher.remaining_balance ?? 0, userCurrency)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Expires</div>
@@ -1484,7 +1463,7 @@ export default function UserDashboard() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
                             <div>
                               <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>🪙{(voucher.remaining_balance ?? 0).toFixed(2)}</div>
+                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>{formatCurrency(voucher.remaining_balance ?? 0, userCurrency)}</div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Expires</div>
@@ -1567,7 +1546,7 @@ export default function UserDashboard() {
                 </button>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', color: 'var(--text-3)' }}>
-                <span><strong>🪙{(activeVoucher.remaining_balance ?? 0).toFixed(2)}</strong> remaining</span>
+                <span><strong>{formatCurrency(activeVoucher.remaining_balance ?? 0, userCurrency)}</strong> remaining</span>
                 <span>Expires {new Date(activeVoucher.expiry_date).toLocaleDateString()}</span>
               </div>
             </div>
@@ -1596,7 +1575,7 @@ export default function UserDashboard() {
                 } catch {
                   // successCopy already false unless a write path above succeeded
                 }
-                
+
                 if (successCopy) {
                   success('Copied ticket code', 'Paste this in the merchant scan box.');
                 } else {
@@ -1629,22 +1608,18 @@ export default function UserDashboard() {
             <div className="glass-card-strong" style={{ padding: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Face Value</span>
-                <strong>🪙{(selectedProduct.value ?? 0).toFixed(2)}</strong>
+                <strong>{formatCurrency(selectedProduct.value ?? 0, userCurrency)}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Purchase Price</span>
                 <strong style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>
-                  {userCurrency !== 'USD'
-                    ? (userFxRate ? formatCurrency((selectedProduct.price ?? 0) * userFxRate, userCurrency) : formatCurrency((selectedProduct.price ?? 0), 'USD'))
-                    : `$${(selectedProduct.price ?? 0).toFixed(2)}`}
+                  {formatCurrency((selectedProduct.price ?? 0), userCurrency)}
                 </strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                 <span style={{ color: 'var(--text-3)' }}>Cashback (10%)</span>
                 <strong style={{ color: '#10b981' }}>
-                  {userCurrency !== 'USD'
-                    ? `+${(userFxRate ? formatCurrency((selectedProduct.value ?? 0) * 0.1 * userFxRate, userCurrency) : formatCurrency((selectedProduct.value ?? 0) * 0.1, 'USD'))}`
-                    : `+$${((selectedProduct.value ?? 0) * 0.1).toFixed(2)}`}
+                  {(`+${formatCurrency((selectedProduct.value ?? 0) * 0.1, userCurrency)}`)}
                 </strong>
               </div>
             </div>
@@ -1654,9 +1629,7 @@ export default function UserDashboard() {
               <div style={{ flex: 1, padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.03)', borderRadius: '14px' }}>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Wallet Balance</div>
                 <strong style={{ fontSize: '1.1rem' }}>
-                  {userCurrency !== 'USD'
-                    ? (userFxRate ? (userFxRate ? formatCurrency(walletBalance * userFxRate, userCurrency) : formatCurrency(walletBalance, 'USD')) : 'Exchange rate unavailable')
-                    : `$${walletBalance.toFixed(2)}`}
+                  {formatCurrency(walletBalance, userCurrency)}
                 </strong>
               </div>
               <button
@@ -1667,11 +1640,7 @@ export default function UserDashboard() {
               >
                 {paymentLoading ? (
                   <><span className="spinner" /> Processing...</>
-                ) : walletBalance < selectedProduct.price ? (
-                  'Insufficient Funds'
-                ) : (
-                  'Pay from Wallet'
-                )}
+                ) : walletBalance < selectedProduct.price ? 'Insufficient Funds' : 'Pay from Wallet'}
               </button>
             </div>
           </div>
@@ -1703,13 +1672,9 @@ export default function UserDashboard() {
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>Available balance</span>
                   <div style={{ textAlign: 'right' }}>
                     <strong style={{ fontSize: '1.1rem', color: 'var(--text-1)' }}>
-                      {convertedWalletBalance ? convertedWalletBalance.formatted : `$${walletBalance.toFixed(2)}`}
+                      {formatCurrency(walletBalance, userCurrency)}
                     </strong>
-                    {convertedWalletBalance && (
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', fontWeight: 600 }}>
-                        ($${walletBalance.toFixed(2)} USD)
-                      </div>
-                    )}
+
                   </div>
                 </div>
 
@@ -1769,18 +1734,14 @@ export default function UserDashboard() {
                     className="input mono"
                     type="number"
                     step="0.01"
-                    max={userCurrency !== 'USD' ? walletBalance * userFxRate : walletBalance}
+                    max={walletBalance}
                     required
                     value={withdrawForm.amount}
                     onChange={(event) => setWithdrawForm({ ...withdrawForm, amount: event.target.value })}
                     placeholder="0.00"
                     style={{ width: '100%', fontSize: '1.1rem', padding: '0.65rem 0.9rem' }}
                   />
-                  {userCurrency !== 'USD' && withdrawForm.amount && !isNaN(parseFloat(withdrawForm.amount)) && (
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: '0.3rem', fontWeight: 500 }}>
-                      ≈ ${(userFxRate ? (parseFloat(withdrawForm.amount) / userFxRate).toFixed(2) : 'unavailable')} USD will be deducted from your wallet
-                    </div>
-                  )}
+
                 </div>
 
                 {/* Dynamic fields based on method */}
@@ -1789,8 +1750,7 @@ export default function UserDashboard() {
                     <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>PayPal Email Address</label>
                     <input className="input mono" type="email" required value={withdrawForm.paypalEmail} onChange={(event) => setWithdrawForm({ ...withdrawForm, paypalEmail: event.target.value })} placeholder="your-paypal@example.com" style={{ width: '100%', padding: '0.65rem 0.9rem' }} />
                   </div>
-                ) : (
-                  (() => {
+                ) : (() => {
                     const bankCfg = getCountryBankConfig(userCountryCode);
                     return (
                       <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -1814,8 +1774,7 @@ export default function UserDashboard() {
                         </div>
                       </div>
                     );
-                  })()
-                )}
+                  })()}
 
                 <button className="btn btn-primary" disabled={withdrawLoading} type="submit" style={{ padding: '0.85rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px', marginTop: '0.25rem' }}>
                   Review Payout Details
@@ -1839,14 +1798,10 @@ export default function UserDashboard() {
                 <div style={{ textAlign: 'center', padding: '1.3rem 1rem', background: 'linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.06))', borderRadius: '18px', border: '1.5px solid rgba(99,102,241,0.18)' }}>
                   <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-3)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.35rem' }}>Withdrawal Amount</div>
                   <div style={{ fontSize: '2.4rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'monospace', lineHeight: 1 }}>
-                    {userCurrency !== 'USD'
-                      ? formatCurrency(parseFloat(withdrawForm.amount || '0'), userCurrency)
-                      : `$${parseFloat(withdrawForm.amount || '0').toFixed(2)}`}
+                    {formatCurrency(parseFloat(withdrawForm.amount || '0'), userCurrency)}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: '0.4rem' }}>
-                    {userCurrency !== 'USD'
-                      ? `≈ $${(userFxRate ? (parseFloat(withdrawForm.amount || '0') / userFxRate).toFixed(2) : 'unavailable')} USD deducted from wallet`
-                      : 'US Dollar'}
+                    {'The requested amount is deducted without conversion'}
                   </div>
                 </div>
 
@@ -1930,9 +1885,7 @@ export default function UserDashboard() {
                   <h3 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>Payout Requested</h3>
                   <p style={{ margin: '0.5rem 0 0', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.92rem' }}>
                     Your payout of <strong>
-                      {userCurrency !== 'USD'
-                        ? formatCurrency(parseFloat(withdrawForm.amount || '0'), userCurrency)
-                        : `$${parseFloat(withdrawForm.amount || '0').toFixed(2)}`}
+                      {formatCurrency(parseFloat(withdrawForm.amount || '0'), userCurrency)}
                     </strong> via {withdrawMethod === 'paypal' ? 'PayPal' : 'Bank Transfer'} has been logged and is being processed.
                   </p>
                 </div>
@@ -1967,7 +1920,7 @@ export default function UserDashboard() {
 
               <div>
                 <label className="label" style={{ fontWeight: 600, fontSize: '0.82rem', marginBottom: '0.35rem' }}>
-                  Amount ({selectedGateway === 'razorpay' ? 'INR' : 'USD'})
+                  Amount ({userCurrency})
                 </label>
                 <input className="input mono" type="number" min="1" required value={addMoneyAmount} onChange={(event) => setAddMoneyAmount(event.target.value)} style={{ width: '100%', fontSize: '1.2rem', padding: '0.75rem 1rem', marginBottom: '1rem' }} />
               </div>
@@ -1988,7 +1941,7 @@ export default function UserDashboard() {
                       borderRadius: '10px'
                     }}
                   >
-                    {selectedGateway === 'razorpay' ? '₹' : '$'}{val}
+                    {profileCountry?.currencySymbol ?? userCurrency}{val}
                   </button>
                 ))}
               </div>
@@ -2002,26 +1955,8 @@ export default function UserDashboard() {
                 userCurrency={userCurrency}
               />
 
-              {/* Exchange rate info for non-USD users */}
-              {userCountryCode && userCurrency !== 'USD' && (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.6rem 0.85rem',
-                  background: 'rgba(99,91,255,0.06)',
-                  border: '1px solid rgba(99,91,255,0.18)',
-                  borderRadius: '10px',
-                  fontSize: '0.8rem',
-                  color: 'var(--text-3)',
-                }}>
-                  <span>💱</span>
-                  <span>
-                    Amount shown in USD. Your local currency: <strong style={{ color: 'var(--text-1)' }}>{userCurrency}</strong>.
-                    Final charge will be converted at live rates.
-                  </span>
-                </div>
-              )}
+              {/* Wallet currency */}
+              <p className="text-sm">Wallet deposits use {userCurrency}. Amounts are never converted.</p>
 
               <div style={{ position: 'relative', zIndex: 0 }}>
                 {addMoneyLoading && (
@@ -2107,7 +2042,7 @@ export default function UserDashboard() {
                         <rect x="2" y="5" width="20" height="14" rx="2" stroke="white" strokeWidth="2"/>
                         <path d="M2 10H22" stroke="white" strokeWidth="2"/>
                       </svg>
-                      Pay ${parseFloat(addMoneyAmount || '0').toFixed(2)} with Stripe
+                      Pay {formatCurrency(parseFloat(addMoneyAmount || '0'), userCurrency)} with Stripe
                     </button>
                   </div>
                 )}
@@ -2131,8 +2066,8 @@ export default function UserDashboard() {
                   style={{ layout: "vertical", color: "blue", shape: "rect", label: "pay" }}
                   createOrder={async () => {
                     const amount = Number(addMoneyAmount);
-                    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error('Enter a valid amount up to $100,000.');
-                    const order = await createPayPalOrder({ amount, currency: 'USD' });
+                    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error('Enter a valid amount up to 100,000 in your wallet currency.');
+                    const order = await createPayPalOrder({ amount, currency: userCurrency });
                     return order.id;
                   }}
                   onApprove={async (data) => {
@@ -2144,7 +2079,7 @@ export default function UserDashboard() {
                       await refreshWalletBalance();
                       await loadData();
                       setPendingPayPalOrder(null);
-                      success('Funds added', `Successfully added $${result.amount.toFixed(2)} to your wallet.`);
+                      success('Funds added', `Successfully added ${formatCurrency(result.amount, userCurrency)} to your wallet.`);
                       setShowAddMoneyModal(false);
                     } catch (err: unknown) {
                       toastError('Deposit pending', getErrorMessage(err, 'Please retry payment verification; do not pay again.'));

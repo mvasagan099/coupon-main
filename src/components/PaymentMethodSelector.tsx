@@ -123,7 +123,7 @@ export default function PaymentMethodSelector({
 
     const currency = userCurrency ?? (countryCode === 'IN' ? 'INR' : 'USD');
 
-    return priorityOrder.map((gwId, idx) => {
+    return priorityOrder.filter(gateway => gateway !== 'paypal' || currency !== 'INR' && currency !== 'AED').map((gwId, idx) => {
       const base = ALL_OPTIONS[gwId];
       let description = '';
       switch (gwId) {
