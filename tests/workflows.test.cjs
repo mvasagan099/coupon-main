@@ -197,7 +197,40 @@ test('all 15 sample detail pages keep Buy disabled even when matching real inven
     const Details = nestedFunction('src/pages/MarketplaceDetailsPage.tsx', 'DetailsContent', context);
     const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(Details, { brandSlug: brand.slug, onRetry() {} })));
     assert.match(html, /disabled=""[^>]*>Buy coupon/); assert.equal(html.includes('<dialog'), false);
-    assert.ok(html.includes('SAMPLE COUPON')); assert.ok(html.includes(brand.sample.launchDate.slice(0, 10))); assert.ok(html.includes(brand.sample.expiryDate.slice(0, 10)));
-    assert.equal(html.includes('Wallet balance:'), false); assert.ok(html.includes(`${brand.name} logo`));
+    assert.ok(html.includes('DEMO · NOT VALID FOR REDEMPTION')); assert.ok(html.includes(brand.sample.launchDate.slice(0, 10))); assert.ok(html.includes(brand.sample.expiryDate.slice(0, 10)));
+    assert.ok(html.includes(`/dashboard/marketplace/brand/${brand.slug}/offers`)); assert.doesNotMatch(html, /Sample|sample/); assert.equal(html.includes('Wallet balance:'), false); assert.ok(html.includes(`${brand.name} logo`));
   }
+});
+
+test('published list excludes demo data, unavailable inventory and unrelated issuers', () => {
+  const { getPublishedOffers, getCatalogueBrand } = brandCatalogue();
+  const now = Date.parse('2026-10-15');
+  const offer = { id: 'real', company_name: ' Flipkart ', title: 'Shopping coupon', country_code: 'IN', currency: 'INR', is_active: true, price: 100, value: 150, created_at: '2026-10-01', expiry_date: '2027-01-01', issue_limit: 10, issued_count: 1 };
+  const inventory = [offer, { ...offer, id: 'other', company_name: 'Other merchant', title: 'Flipkart offer' }, ...[
+    { country_code: 'US' }, { currency: 'USD' }, { is_active: false }, { expiry_date: '2026-01-01' }, { issued_count: 10 }, { created_at: '2027-01-01' }
+  ].map((change, index) => ({ ...offer, id: `invalid-${index}`, ...change }))];
+  assert.deepEqual(Array.from(getPublishedOffers(inventory, 'IN', 'INR', now, getCatalogueBrand('flipkart')), item => item.id), ['real']);
+  assert.equal(getPublishedOffers(inventory, 'IN', 'INR', now).length, 2);
+  assert.equal(getPublishedOffers(inventory, null, 'INR', now).length, 0);
+  assert.equal(getPublishedOffers(inventory, 'IN', 'INR', now, getCatalogueBrand('amazon')).length, 0);
+});
+test('published coupons render stored dates and checkout links without demo inventory', () => {
+  const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+  const router = require('react-router-dom');
+  const catalogue = brandCatalogue();
+  const countries = compile(fs.readFileSync(path.join(root, 'src/lib/countries.ts'), 'utf8'), {});
+  let brandSlug = 'flipkart', stateIndex = 0;
+  const data = { userId: 'qa', profile: { country_code: 'IN', currency: 'INR' }, offers: [{ id: 'stored-offer', company_name: 'Flipkart', title: 'Published shopping coupon', country_code: 'IN', currency: 'INR', price: 100, value: 150, created_at: '2026-10-01', expiry_date: '2027-02-01', is_active: true }] };
+  const page = compile(fs.readFileSync(path.join(root, 'src/pages/PublishedCouponsPage.tsx'), 'utf8'), {
+    require: name => name === 'react' ? { ...React, useEffect() {}, useState: initial => [stateIndex++ === 0 ? data : initial, () => {}] } :
+      name === 'react-router-dom' ? { ...router, useParams: () => ({ brandSlug }) } :
+      name.includes('AuthContext') ? { useAuth: () => ({ user: { id: 'qa' } }) } :
+      name.includes('brandCatalog') ? catalogue : name.includes('countries') ? countries :
+      name.includes('exchangeRate') ? { formatCurrency: value => `INR ${value}` } :
+      name.includes('useNow') ? { useNow: () => Date.parse('2026-10-15') } :
+      name.includes('supabase') || name.endsWith('.css') || name.includes('LoadingPage') ? {} : require(name),
+  }).default;
+  function render() { stateIndex = 0; return renderToStaticMarkup(React.createElement(router.MemoryRouter, null, React.createElement(page))); }
+  const html = render(); assert.ok(html.includes('/dashboard/marketplace/coupon/stored-offer')); assert.match(html, /October 1, 2026/); assert.match(html, /February 1, 2027/); assert.doesNotMatch(html, /Demo|sample/);
+  brandSlug = 'amazon'; const empty = render(); assert.match(empty, /No .*Amazon.*coupons available yet/); assert.ok(empty.includes('/dashboard/marketplace/offers')); assert.equal(empty.includes('stored-offer'), false);
 });

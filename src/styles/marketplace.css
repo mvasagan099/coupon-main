@@ -53,3 +53,12 @@
 .details-brand-heading p { margin-bottom: 0; }
 @media (max-width: 700px) { .brand-catalogue-art { min-height: 165px; } .brand-logo--hero { width: 72px; height: 72px; padding: 15px; border-radius: 18px; } .details-brand-heading { align-items: flex-start; gap: 1rem; flex-wrap: wrap; } }
 @media (max-width: 700px) { .brand-logo--card { width: 48px; height: 48px; padding: 10px; border-radius: 13px; } .brand-art-top { gap: .5rem; } .brand-art-top .brand-preview-pill { font-size: .6rem; padding: .25rem .4rem; } }
+
+.published-offers-callout { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; margin-bottom: 1.5rem; }
+.published-offers-callout h2 { margin-bottom: .4rem; }
+.published-offers-callout p { margin: 0; }
+.published-offers-callout .btn { flex-shrink: 0; }
+.published-offers-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1.5rem; }
+.published-offers-grid h2 { margin-top: .75rem; overflow-wrap: anywhere; }
+.published-browse-link { margin-bottom: 1.5rem; }
+@media (max-width: 700px) { .published-offers-callout { align-items: flex-start; flex-direction: column; } .published-offers-grid { grid-template-columns: 1fr; } }

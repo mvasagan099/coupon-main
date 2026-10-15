@@ -46,15 +46,15 @@ export const CATALOGUE_BRANDS: CatalogueBrand[] = [
   logoPath: `/brands/${brand.slug}.svg`,
   sample: {
     isSample: true as const,
-    title: `${brand.name} sample coupon`,
+    title: `${brand.name} coupon`,
     value: SAMPLE_VALUES[index],
     price: Math.round(SAMPLE_VALUES[index] * (0.8 + (index % 4) * 0.05)),
     launchDate: `2026-10-${String(1 + (index * 3) % 14).padStart(2, '0')}T00:00:00Z`,
     expiryDate: `2027-${String(1 + index % 3).padStart(2, '0')}-${String(10 + index % 18).padStart(2, '0')}T23:59:59Z`,
     countryCode: 'IN',
     quantity: 75 + (index * 37) % 300,
-    description: `An illustrative ${brand.category.toLowerCase()} coupon with a face value of ₹${SAMPLE_VALUES[index].toLocaleString('en-IN')}. This is sample content for the ${brand.name} preview, not a real company offer.`,
-    terms: 'Sample terms only: single-use coupon; India accounts; valid within the displayed dates; cannot be exchanged for cash or combined with another offer. These examples are not issued or approved by the brand. Buying, payment and redemption are disabled.',
+    description: `An illustrative ${brand.category.toLowerCase()} coupon with a face value of ₹${SAMPLE_VALUES[index].toLocaleString('en-IN')}. This is demo content for the ${brand.name} preview, not a real company offer.`,
+    terms: 'Demo terms only: single-use coupon; India accounts; valid within the displayed dates; cannot be exchanged for cash or combined with another offer. These examples are not issued or approved by the brand. Buying, payment and redemption are disabled.',
   },
 }));
 
@@ -71,4 +71,11 @@ export function getOfferUnavailableReason(offer: GiftCard, countryCode: string |
   if (offer.created_at && Date.parse(offer.created_at) > now) return 'This coupon has not launched yet.';
   if (offer.issue_limit != null && Number(offer.issued_count ?? 0) >= Number(offer.issue_limit)) return 'This coupon is sold out.';
   return null;
+}
+
+// Match the published issuer name, never a title or description mentioning a famous brand.
+export function getPublishedOffers(offers: GiftCard[], countryCode: string | null, currency: string, now: number, brand?: CatalogueBrand): GiftCard[] {
+  return offers.filter(offer => !getOfferUnavailableReason(offer, countryCode, now)
+    && (!offer.currency || offer.currency === currency)
+    && (!brand || offer.company_name?.trim().toLowerCase() === brand.name.toLowerCase()));
 }

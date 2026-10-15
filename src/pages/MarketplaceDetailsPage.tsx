@@ -67,7 +67,7 @@ function DetailsContent({ brandSlug, offerId, onRetry }: { brandSlug?: string; o
   const offerCurrency = offer?.currency ?? offerCountry?.currency ?? currency;
   const title = offer?.title ?? sample?.title ?? 'Coupon';
   const companyName = offer?.company_name ?? brand?.name ?? 'Merchant';
-  const unavailable = offer ? getOfferUnavailableReason(offer, profile.country_code, now) ?? (offerCurrency !== currency ? 'This coupon currency does not match your wallet.' : null) : 'Sample coupon only. Prices, dates and quantities are illustrative. Buying and redemption are disabled.';
+  const unavailable = offer ? getOfferUnavailableReason(offer, profile.country_code, now) ?? (offerCurrency !== currency ? 'This coupon currency does not match your wallet.' : null) : 'Demo — not valid for redemption. Prices, dates and quantities are illustrative. Buying and redemption are disabled.';
   const insufficient = !!offer && Number(profile.wallet_balance) < Number(offer.price);
   const canBuy = !brand && !!offer && !unavailable && !insufficient && !purchaseError;
   const remaining = offer?.issue_limit != null ? Math.max(0, Number(offer.issue_limit) - Number(offer.issued_count ?? 0)) : null;
@@ -91,11 +91,12 @@ function DetailsContent({ brandSlug, offerId, onRetry }: { brandSlug?: string; o
     <div className="details-hero" style={brand ? { background: `linear-gradient(125deg, ${brand.color}, #17233b)` } : undefined}>
       <div className="details-brand-heading">
         {brand && <BrandLogo brand={brand} size="hero" />}
-        <div><span className="brand-preview-pill">{offer ? 'Coupon details' : 'Sample brand preview'}</span>
+        <div><span className="brand-preview-pill">{offer ? 'Coupon details' : 'Brand collection'}</span>
           <h1>{brand?.name ?? companyName}</h1>
           <p>{brand?.category ?? 'Discover your next gift. Review the details, then purchase securely with your wallet.'}</p></div>
       </div>
     </div>
+    {brand && <div className="details-panel published-offers-callout"><div><h2>Looking for a coupon you can buy?</h2><p>See published {brand.name} coupons for your country, with current prices, launch dates and expiry dates.</p></div><Link className="btn btn-primary" to={`/dashboard/marketplace/brand/${brand.slug}/offers`}>View available coupons</Link></div>}
     <div className="details-grid">
       <div className="details-panel">
         <span className="section-label">ABOUT THE COMPANY</span>
@@ -105,12 +106,12 @@ function DetailsContent({ brandSlug, offerId, onRetry }: { brandSlug?: string; o
         <p>{offer?.description || sample?.description}</p>
 
         <h3>How it works</h3>
-        <p>{offer ? 'Buy with your wallet, find the issued coupon in My Cards, and follow the issuer’s redemption instructions. Only users registered in the coupon’s country can purchase and redeem it.' : 'Explore the sample coupon value, launch date, expiry and eligible country below. This preview cannot be bought, paid for or redeemed.'}</p>
+        <p>{offer ? 'Buy with your wallet, find the issued coupon in My Cards, and follow the issuer’s redemption instructions. Only users registered in the coupon’s country can purchase and redeem it.' : 'Explore the demo coupon value, launch date, expiry and eligible country below. This preview cannot be bought, paid for or redeemed.'}</p>
         <h3>Terms & conditions</h3>
         <p>{offer?.terms || (offer ? 'No additional terms have been supplied by the issuer. Contact support if you need clarification before purchasing.' : sample?.terms)}</p>
       </div>
       <aside className="details-panel" aria-label="Coupon purchase details">
-        <span className="section-label">{offer ? 'PUBLISHED OFFER' : 'SAMPLE COUPON · PURCHASES DISABLED'}</span>
+        <span className="section-label">{offer ? 'PUBLISHED OFFER' : 'DEMO · NOT VALID FOR REDEMPTION'}</span>
         <h2 style={{ marginTop: '.65rem' }}>{title}</h2>
         <div className="details-price">{offer ? formatCurrency(Number(offer.price), offerCurrency) : sample ? formatCurrency(sample.price, offerCurrency) : 'Unavailable'}</div>
         <p>{offer ? 'One coupon · Pay from your wallet' : 'Illustrative price only · No payment is collected.'}</p>
@@ -119,8 +120,8 @@ function DetailsContent({ brandSlug, offerId, onRetry }: { brandSlug?: string; o
           <div><dt>Launch date</dt><dd>{dateLabel(offer?.created_at ?? sample?.launchDate)}</dd></div>
           <div><dt>Expiry date</dt><dd>{dateLabel(offer?.expiry_date ?? sample?.expiryDate)}</dd></div>
           <div><dt>Eligible country</dt><dd>{offerCountry?.name ?? 'Not announced'}</dd></div>
-          <div><dt>Availability</dt><dd>{offer ? unavailable ? 'Unavailable' : remaining == null ? 'Available' : `${remaining} left` : 'Sample only'}</dd></div>
-          {sample && <div><dt>Sample quantity</dt><dd>{sample.quantity} coupons (demo)</dd></div>}
+          <div><dt>Availability</dt><dd>{offer ? unavailable ? 'Unavailable' : remaining == null ? 'Available' : `${remaining} left` : 'Demo only'}</dd></div>
+          {sample && <div><dt>Demo quantity</dt><dd>{sample.quantity} coupons (demo)</dd></div>}
         </dl>
         {unavailable && <div className="details-callout" role="status">{unavailable}</div>}
         {offer && <p>Wallet balance: <strong>{formatCurrency(profile.wallet_balance, currency)}</strong>. Amounts are never converted.</p>}

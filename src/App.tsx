@@ -9,6 +9,7 @@ import Layout from './components/Layout';
 import SupportWidget from './components/SupportWidget';
 
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
+const PublishedCouponsPage = lazy(() => import('./pages/PublishedCouponsPage'));
 const MarketplaceDetailsPage = lazy(() => import('./pages/MarketplaceDetailsPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
@@ -89,6 +90,8 @@ function App() {
                     path="dashboard"
                     element={<Navigate to="/dashboard/marketplace" replace />}
                   />
+                  <Route path="dashboard/marketplace/offers" element={<ProtectedRoute><PublishedCouponsPage /></ProtectedRoute>} />
+                  <Route path="dashboard/marketplace/brand/:brandSlug/offers" element={<ProtectedRoute><PublishedCouponsPage /></ProtectedRoute>} />
                   <Route path="dashboard/marketplace/brand/:brandSlug" element={<ProtectedRoute><MarketplaceDetailsPage /></ProtectedRoute>} />
                   <Route path="dashboard/marketplace/coupon/:offerId" element={<ProtectedRoute><MarketplaceDetailsPage /></ProtectedRoute>} />
                   <Route
