@@ -114,7 +114,7 @@ function DetailsContent({ brandSlug, offerId, onRetry }: { brandSlug?: string; o
         <span className="section-label">{offer ? 'PUBLISHED OFFER' : 'DEMO · NOT VALID FOR REDEMPTION'}</span>
         <h2 style={{ marginTop: '.65rem' }}>{title}</h2>
         <div className="details-price">{offer ? formatCurrency(Number(offer.price), offerCurrency) : sample ? formatCurrency(sample.price, offerCurrency) : 'Unavailable'}</div>
-        <p>{offer ? 'One coupon · Pay from your wallet' : 'Illustrative price only · No payment is collected.'}</p>
+        <p>{offer ? 'Payment method: Wallet · One coupon' : 'Illustrative price only · No payment is collected.'}</p>
         <dl className="details-facts">
           <div><dt>Coupon value</dt><dd>{offer ? formatCurrency(Number(offer.value), offerCurrency) : sample ? formatCurrency(sample.value, offerCurrency) : 'Unavailable'}</dd></div>
           <div><dt>Launch date</dt><dd>{dateLabel(offer?.created_at ?? sample?.launchDate)}</dd></div>
@@ -127,7 +127,7 @@ function DetailsContent({ brandSlug, offerId, onRetry }: { brandSlug?: string; o
         {offer && <p>Wallet balance: <strong>{formatCurrency(profile.wallet_balance, currency)}</strong>. Amounts are never converted.</p>}
         {insufficient && !unavailable && <p>Add funds to your wallet before purchasing this coupon. <Link to="/dashboard/wallet">Open wallet</Link></p>}
         {purchaseError && <div className="details-callout" role="alert">{purchaseError} <Link to="/dashboard/cards">View My Cards</Link></div>}
-        <button className="btn btn-primary" style={{ width: '100%' }} disabled={!canBuy || busy} onClick={() => dialog.current?.showModal()}>Buy coupon{offer && !unavailable ? ` · ${formatCurrency(Number(offer.price), offerCurrency)}` : ''}</button>
+        <button className="btn btn-primary" style={{ width: '100%' }} disabled={!canBuy || busy} onClick={() => dialog.current?.showModal()}>{offer ? 'Pay with wallet' : 'Buy coupon'}{offer && !unavailable ? ` · ${formatCurrency(Number(offer.price), offerCurrency)}` : ''}</button>
         <p style={{ display: 'flex', gap: '.5rem', alignItems: 'center', fontSize: '.78rem', marginTop: '1rem' }}><ShieldCheck size={16} />{offer ? 'Secure wallet checkout. Country eligibility applies.' : 'No payment is collected for previews.'}</p>
       </aside>
     </div>

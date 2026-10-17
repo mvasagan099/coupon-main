@@ -62,3 +62,11 @@
 .published-offers-grid h2 { margin-top: .75rem; overflow-wrap: anywhere; }
 .published-browse-link { margin-bottom: 1.5rem; }
 @media (max-width: 700px) { .published-offers-callout { align-items: flex-start; flex-direction: column; } .published-offers-grid { grid-template-columns: 1fr; } }
+
+.brand-coupon-facts { margin: 0 1rem; padding: .3rem 0 .8rem; }
+.brand-coupon-facts > div { display: flex; justify-content: space-between; gap: .5rem; margin-top: .5rem; font-size: .75rem; }
+.brand-coupon-facts dt { color: var(--text-3); }
+.brand-coupon-facts dd { margin: 0; text-align: right; font-weight: 650; overflow-wrap: anywhere; }
+.brand-coupon-action { border-top: 1px solid var(--border); padding: .9rem 1rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; color: var(--text-3); font-size: .8rem; }
+.brand-coupon-action span + span { color: var(--text-1); font-weight: 700; }
+@media (max-width: 700px) { .brand-coupon-facts > div { flex-direction: column; gap: .15rem; } .brand-coupon-facts dd { text-align: left; } }

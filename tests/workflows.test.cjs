@@ -172,7 +172,7 @@ test('purchase confirmation prevents double submission and never purchases a bra
 test('brand catalogue renders 15 links and no home-page purchase controls', () => {
   const React = require('react'); const { renderToStaticMarkup } = require('react-dom/server'); const { MemoryRouter } = require('react-router-dom');
   const exports = compile(fs.readFileSync(path.join(root, 'src/components/BrandCatalogue.tsx'), 'utf8'), {
-    require: name => name.includes('brandCatalog') ? brandCatalogue() : name.includes('BrandLogo') ? compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }) : name.endsWith('.css') ? {} : require(name),
+    require: name => name.includes('brandCatalog') ? brandCatalogue() : name.includes('BrandLogo') ? compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }) : name.includes('exchangeRate') ? { formatCurrency: value => `INR ${value}` } : name.includes('useNow') ? { useNow: () => Date.parse('2026-10-17') } : name.endsWith('.css') ? {} : require(name),
   });
   const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: '' })));
   assert.equal((html.match(/aria-label="View .*? coupon details"/g) || []).length, 15);
@@ -233,4 +233,16 @@ test('published coupons render stored dates and checkout links without demo inve
   function render() { stateIndex = 0; return renderToStaticMarkup(React.createElement(router.MemoryRouter, null, React.createElement(page))); }
   const html = render(); assert.ok(html.includes('/dashboard/marketplace/coupon/stored-offer')); assert.match(html, /October 1, 2026/); assert.match(html, /February 1, 2027/); assert.doesNotMatch(html, /Demo|sample/);
   brandSlug = 'amazon'; const empty = render(); assert.match(empty, /No .*Amazon.*coupons available yet/); assert.ok(empty.includes('/dashboard/marketplace/offers')); assert.equal(empty.includes('stored-offer'), false);
+});
+test('brand cards show published coupon facts and never sell invented catalogue values', () => {
+  const React = require('react'); const { renderToStaticMarkup } = require('react-dom/server'); const { MemoryRouter } = require('react-router-dom');
+  const exports = compile(fs.readFileSync(path.join(root, 'src/components/BrandCatalogue.tsx'), 'utf8'), {
+    require: name => name.includes('brandCatalog') ? brandCatalogue() : name.includes('BrandLogo') ? compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }) : name.includes('exchangeRate') ? { formatCurrency: value => `INR ${value}` } : name.includes('useNow') ? { useNow: () => Date.parse('2026-10-17') } : name.endsWith('.css') ? {} : require(name),
+  });
+  const offer = { id: 'authorized-offer', company_name: 'Amazon', country_code: 'IN', currency: 'INR', price: 450, value: 500, is_active: true, created_at: '2026-10-01', expiry_date: '2027-02-01', issue_limit: 30, issued_count: 7 };
+  const render = props => renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: 'Amazon', countryCode: 'IN', currency: 'INR', ...props })));
+  const html = render({ offers: [offer] }); assert.ok(html.includes('/coupon/authorized-offer')); assert.ok(html.includes('INR 500')); assert.ok(html.includes('INR 450')); assert.match(html, /Feb 1, 2027/); assert.match(html, /<dd>23<\/dd>/); assert.doesNotMatch(html, /Demo|Sample|INR 2000/);
+  for (const changes of [{ countryCode: 'US' }, { offers: [{ ...offer, issued_count: 30 }] }, { inventoryError: true }]) {
+    const unavailable = render({ offers: [offer], ...changes }); assert.equal(unavailable.includes('/coupon/authorized-offer'), false); assert.equal(unavailable.includes('INR 500'), false); assert.ok(unavailable.includes('/brand/amazon/offers'));
+  }
 });

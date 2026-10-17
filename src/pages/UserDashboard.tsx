@@ -687,7 +687,7 @@ export default function UserDashboard() {
             </div>
           </div>
 
-          <BrandCatalogue search={catalogSearch} />
+          <BrandCatalogue search={catalogSearch} offers={giftCards} countryCode={userCountryCode} currency={userCurrency} inventoryError={!!loadError} />
         </div>
       )}
 
