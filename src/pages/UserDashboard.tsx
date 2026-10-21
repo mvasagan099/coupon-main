@@ -140,8 +140,8 @@ export default function UserDashboard() {
   const [cardsPage, setCardsPage] = useState(1);
   const [vouchersTab, setVouchersTab] = useState<'unused' | 'used' | 'inactive'>('unused');
   const ITEMS_PER_PAGE = 5;
-  const CARDS_PER_PAGE = 6;
-  const MARKETPLACE_PER_PAGE = 6;
+  const CARDS_PER_PAGE = 5;
+  const MARKETPLACE_PER_PAGE = 5;
 
   // Country / currency state
   const [userCountryCode, setUserCountryCode] = useState<string | null>(null);
