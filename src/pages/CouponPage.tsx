@@ -6,7 +6,7 @@ import { QRCode } from "react-qr-code";
 import { useAuth } from "../context/AuthContext";
 import { getUserOrders, supabase } from "../lib/supabase";
 import { useState, useEffect } from "react";
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Copy, Check } from 'lucide-react';
 
 export default function CouponPage() {
   const { id } = useParams<{ id: string }>();
@@ -106,6 +106,34 @@ export default function CouponPage() {
   const currency = getCountryByCode(order.coupon?.country_code || '')?.currency;
   const money = (amount: number) => currency ? formatCurrency(Number(amount),currency) : `${Number(amount).toFixed(2)} (currency unavailable)`;
 
+  const couponCode = order.coupon?.code || (order.coupon_id ? `CPN-${order.coupon_id.substring(0, 8).toUpperCase()}` : '');
+  const maskedCode = '*'.repeat(Math.min(Math.max((couponCode.length || 12), 10), 16));
+
+  const copyCode = async () => {
+    if (!couponCode) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(couponCode);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = couponCode;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setCopied(true);
+      setShowCode(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.error('Copy failed', e);
+    }
+  };
+
   return (
     <div style={{ maxWidth: '440px', margin: '0 auto' }} className="fade-in">
         {/* Back navigation */}
@@ -197,7 +225,100 @@ export default function CouponPage() {
           </div>
 
           {/* QR section with "Shadow" depth */}
-          <div style={{ padding: '2.5rem 1.75rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.75rem', background: 'var(--bg-2)' }}>
+          <div style={{ padding: '2rem 1.75rem 2.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.4rem', background: 'var(--bg-2)' }}>
+
+            {/* Voucher Code Reveal & Copy Box */}
+            {couponCode && (
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: '300px',
+                  background: 'var(--surface-soft)',
+                  border: '1.5px solid var(--border)',
+                  borderRadius: '16px',
+                  padding: '0.75rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                  boxShadow: '0 2px 10px rgba(0, 0, 0, 0.04)',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-4)', letterSpacing: '0.12em' }}>
+                    Coupon Code
+                  </span>
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: '1.1rem',
+                      fontWeight: 800,
+                      letterSpacing: showCode ? '0.06em' : '0.22em',
+                      color: showCode ? 'var(--primary)' : 'var(--text-2)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      marginTop: '0.18rem',
+                      cursor: 'pointer',
+                      userSelect: showCode ? 'all' : 'none',
+                    }}
+                    onClick={() => setShowCode(!showCode)}
+                    title={showCode ? couponCode : 'Click to reveal'}
+                  >
+                    {showCode ? couponCode : maskedCode}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowCode(!showCode)}
+                    aria-label={showCode ? 'Hide coupon code' : 'Reveal coupon code'}
+                    title={showCode ? 'Hide code' : 'Reveal code'}
+                    style={{
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '10px',
+                      padding: '0.5rem',
+                      color: showCode ? 'var(--primary)' : 'var(--text-3)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {showCode ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={copyCode}
+                    aria-label={copied ? 'Code copied' : 'Copy coupon code'}
+                    title={copied ? 'Copied to clipboard!' : 'Copy code'}
+                    style={{
+                      background: copied ? 'var(--green-muted)' : 'var(--surface)',
+                      border: `1px solid ${copied ? 'var(--green-border)' : 'var(--border)'}`,
+                      borderRadius: '10px',
+                      padding: '0.5rem 0.75rem',
+                      color: copied ? 'var(--green)' : 'var(--text-2)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copied ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div style={{ position: 'relative' }}>
                {/* Frame for the QR */}
                <div style={{
@@ -247,71 +368,6 @@ export default function CouponPage() {
                     : 'Show this QR code to the store manager to scan and unlock your rewards.'}
                </p>
             </div>
-
-            {isUsed && order?.coupon?.code && (
-              <div style={{
-                padding: '1.25rem',
-                background: 'var(--bg-3)',
-                border: '1px solid var(--border)',
-                borderRadius: '16px',
-                width: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-4)', letterSpacing: '0.1em' }}>
-                  REDEEMED ONLINE CODE
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <span className="mono" style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--amber)', letterSpacing: '0.1em' }}>
-                    {showCode ? order.coupon.code : '••••••••••••'}
-                  </span>
-                  <button
-                    onClick={() => setShowCode(!showCode)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0, display: 'flex', marginLeft: '-0.25rem' }}
-                  >
-                    {showCode ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        if (navigator?.clipboard?.writeText) {
-                          await navigator.clipboard.writeText(order.coupon.code);
-                        } else {
-                          const textArea = document.createElement("textarea");
-                          textArea.value = order.coupon.code;
-                          textArea.style.position = "fixed";
-                          textArea.style.left = "-999999px";
-                          textArea.style.top = "-999999px";
-                          document.body.appendChild(textArea);
-                          textArea.focus();
-                          textArea.select();
-                          document.execCommand('copy');
-                          textArea.remove();
-                        }
-                      } catch (e) {
-                        console.error('Copy failed', e);
-                      }
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                    style={{
-                      background: 'var(--amber-muted)',
-                      border: '1px solid var(--amber-border)',
-                      borderRadius: '8px',
-                      padding: '0.4rem 0.8rem',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      color: 'var(--amber)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {copied ? 'Copied!' : 'Copy'}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Footer with unique ID */}
