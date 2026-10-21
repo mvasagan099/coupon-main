@@ -12,6 +12,9 @@ ALTER TABLE public.companies
   ADD COLUMN IF NOT EXISTS redemption_destination TEXT
   CHECK (redemption_destination IN ('gaming','lottery','couponvault'));
 
+ALTER TABLE public.companies
+  ADD COLUMN IF NOT EXISTS logo_url TEXT;
+
 -- 2. Add destination column to gift_cards (inherited from company at creation, immutable after)
 ALTER TABLE public.gift_cards
   ADD COLUMN IF NOT EXISTS redemption_destination TEXT
