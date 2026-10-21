@@ -1,20 +1,21 @@
 import { Link } from 'react-router-dom';
 import { ArrowUpRight } from 'lucide-react';
 import BrandLogo from './BrandLogo';
-import { CATALOGUE_BRANDS, getPublishedOffers } from '../lib/brandCatalog';
+import { getPublishedOffers } from '../lib/brandCatalog';
+import type { CatalogueBrand } from '../lib/brandCatalog';
 import type { GiftCard } from '../lib/supabase';
 import { formatCurrency } from '../lib/exchangeRate';
 import { useNow } from '../hooks/useNow';
 import '../styles/marketplace.css';
 
-export default function BrandCatalogue({ search, visible = true, offers = [], countryCode = null, currency = 'INR', inventoryError = false }: { search: string; visible?: boolean; offers?: GiftCard[]; countryCode?: string | null; currency?: string; inventoryError?: boolean }) {
+export default function BrandCatalogue({ search, visible = true, offers = [], countryCode = null, currency = 'INR', inventoryError = false, brands: campaigns }: { brands: CatalogueBrand[]; search: string; visible?: boolean; offers?: GiftCard[]; countryCode?: string | null; currency?: string; inventoryError?: boolean }) {
   const now = useNow();
   const query = search.trim().toLowerCase();
-  const brands = CATALOGUE_BRANDS.filter(brand => `${brand.name} ${brand.category}`.toLowerCase().includes(query));
+  const brands = campaigns.filter(brand => `${brand.name} ${brand.category}`.toLowerCase().includes(query));
   if (!visible || brands.length === 0) return null;
   return <section className="brand-catalogue" aria-labelledby="brand-catalogue-title">
     <div className="catalogue-section-heading">
-      <div><span className="section-label">THE BRAND COLLECTION</span><h2 id="brand-catalogue-title">A little something for everyone.</h2><p>Explore 15 popular brands. Check coupon value, expiry and availability. Open an available offer to buy with your wallet.</p></div>
+      <div><span className="section-label">THE BRAND COLLECTION</span><h2 id="brand-catalogue-title">A little something for everyone.</h2><p>Explore our brand campaigns. Check coupon value, expiry and availability. Open an available offer to buy with your wallet.</p></div>
       <span className="catalogue-count">{brands.length} {brands.length === 1 ? 'brand' : 'brands'}</span>
     </div>
     <div className="brand-catalogue-grid">

@@ -33,6 +33,7 @@ const merchantLinks: NavLink[] = [
 const adminLinks: NavLink[] = [
   { label: 'Overview',    path: '/admin/overview',        Icon: BarChart3 },
   { label: 'Partners',    path: '/admin/partners',        Icon: Store },
+  { label: 'Campaigns',   path: '/admin/campaigns',       Icon: Zap },
   { label: 'Users',       path: '/admin/users',           Icon: Users },
   { label: 'Ledger',      path: '/admin/ledger',          Icon: BookOpen },
   { label: 'Approvals',   path: '/admin/approvals',       Icon: CheckCircle },
@@ -77,7 +78,7 @@ export default function TopNav({ portal }: TopNavProps) {
   };
 
   return (
-    <nav className="flex items-center gap-1 md:gap-2 overflow-x-auto py-1 no-scrollbar w-full md:w-auto md:justify-center" style={{ scrollbarWidth: 'none' }}>
+    <nav className="flex min-w-0 flex-1 items-center gap-1 md:gap-2 overflow-x-auto py-1 no-scrollbar w-full md:w-auto md:justify-center" style={{ scrollbarWidth: 'none' }}>
       {signOutError && <span role="alert">{signOutError}</span>}
       {links.map((link, index) => {
         const isActive = index === 0

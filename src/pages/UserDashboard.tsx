@@ -1,4 +1,4 @@
-import BrandCatalogue from '../components/BrandCatalogue';
+import DatabaseBrandCatalogue from '../components/DatabaseBrandCatalogue';
 import { voucherState } from '../lib/voucherState';
 import { useNow } from '../hooks/useNow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -687,7 +687,7 @@ export default function UserDashboard() {
             </div>
           </div>
 
-          <BrandCatalogue search={catalogSearch} offers={giftCards} countryCode={userCountryCode} currency={userCurrency} inventoryError={!!loadError} />
+          <DatabaseBrandCatalogue search={catalogSearch} offers={giftCards} countryCode={userCountryCode} currency={userCurrency} inventoryError={!!loadError} />
         </div>
       )}
 

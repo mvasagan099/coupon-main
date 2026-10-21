@@ -9,6 +9,7 @@ import Layout from './components/Layout';
 import SupportWidget from './components/SupportWidget';
 
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
+const AdminCampaignsPage = lazy(() => import('./pages/AdminCampaignsPage'));
 const PublishedCouponsPage = lazy(() => import('./pages/PublishedCouponsPage'));
 const MarketplaceDetailsPage = lazy(() => import('./pages/MarketplaceDetailsPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -92,7 +93,7 @@ function App() {
                   />
                   <Route path="dashboard/marketplace/offers" element={<ProtectedRoute><PublishedCouponsPage /></ProtectedRoute>} />
                   <Route path="dashboard/marketplace/brand/:brandSlug/offers" element={<ProtectedRoute><PublishedCouponsPage /></ProtectedRoute>} />
-                  <Route path="dashboard/marketplace/brand/:brandSlug" element={<ProtectedRoute><MarketplaceDetailsPage /></ProtectedRoute>} />
+                  <Route path="dashboard/marketplace/brand/:brandSlug" element={<ProtectedRoute><PublishedCouponsPage /></ProtectedRoute>} />
                   <Route path="dashboard/marketplace/coupon/:offerId" element={<ProtectedRoute><MarketplaceDetailsPage /></ProtectedRoute>} />
                   <Route
                     path="dashboard/:section"
@@ -121,6 +122,7 @@ function App() {
                     path="admin"
                     element={<Navigate to="/admin/overview" replace />}
                   />
+                  <Route path="admin/campaigns" element={<ProtectedRoute adminOnly><AdminCampaignsPage /></ProtectedRoute>} />
                   <Route
                     path="admin/:section"
                     element={

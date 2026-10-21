@@ -20,7 +20,8 @@ export interface CatalogueBrand {
   color: string;
   description: string;
   logoPath: string;
-  sample: SampleBrandCoupon;
+  sample?: SampleBrandCoupon;
+  issuerCompanyId?: string | null;
 }
 
 // Fixed illustrative data: values do not change on refresh and never represent purchasable inventory.
@@ -77,5 +78,5 @@ export function getOfferUnavailableReason(offer: GiftCard, countryCode: string |
 export function getPublishedOffers(offers: GiftCard[], countryCode: string | null, currency: string, now: number, brand?: CatalogueBrand): GiftCard[] {
   return offers.filter(offer => !getOfferUnavailableReason(offer, countryCode, now)
     && (!offer.currency || offer.currency === currency)
-    && (!brand || offer.company_name?.trim().toLowerCase() === brand.name.toLowerCase()));
+    && (!brand || (brand.issuerCompanyId !== undefined ? !!brand.issuerCompanyId && offer.company_id === brand.issuerCompanyId : offer.company_name?.trim().toLowerCase() === brand.name.toLowerCase())));
 }

@@ -174,11 +174,11 @@ test('brand catalogue renders 15 links and no home-page purchase controls', () =
   const exports = compile(fs.readFileSync(path.join(root, 'src/components/BrandCatalogue.tsx'), 'utf8'), {
     require: name => name.includes('brandCatalog') ? brandCatalogue() : name.includes('BrandLogo') ? compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }) : name.includes('exchangeRate') ? { formatCurrency: value => `INR ${value}` } : name.includes('useNow') ? { useNow: () => Date.parse('2026-10-17') } : name.endsWith('.css') ? {} : require(name),
   });
-  const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: '' })));
+  const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: '', brands: brandCatalogue().CATALOGUE_BRANDS })));
   assert.equal((html.match(/aria-label="View .*? coupon details"/g) || []).length, 15);
   assert.equal((html.match(/<img /g) || []).length, 15);
   assert.equal(html.includes('<button'), false); assert.equal(html.includes('Buy coupon'), false);
-  const filtered = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: 'Meesho' })));
+  const filtered = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: 'Meesho', brands: brandCatalogue().CATALOGUE_BRANDS })));
   assert.equal((filtered.match(/aria-label="View .*? coupon details"/g) || []).length, 1);
 });
 test('all 15 sample detail pages keep Buy disabled even when matching real inventory exists', () => {
@@ -220,12 +220,12 @@ test('published coupons render stored dates and checkout links without demo inve
   const catalogue = brandCatalogue();
   const countries = compile(fs.readFileSync(path.join(root, 'src/lib/countries.ts'), 'utf8'), {});
   let brandSlug = 'flipkart', stateIndex = 0;
-  const data = { userId: 'qa', profile: { country_code: 'IN', currency: 'INR' }, offers: [{ id: 'stored-offer', company_name: 'Flipkart', title: 'Published shopping coupon', country_code: 'IN', currency: 'INR', price: 100, value: 150, created_at: '2026-10-01', expiry_date: '2027-02-01', is_active: true }] };
+  const data = { campaigns: catalogue.CATALOGUE_BRANDS.map(brand => ({ ...brand, logo_path: brand.logoPath, issuer_company_id: brand.slug === 'flipkart' ? 'merchant' : null, country_code: null })), userId: 'qa', profile: { country_code: 'IN', currency: 'INR' }, offers: [{ id: 'stored-offer', company_id: 'merchant', company_name: 'Flipkart', title: 'Published shopping coupon', country_code: 'IN', currency: 'INR', price: 100, value: 150, created_at: '2026-10-01', expiry_date: '2027-02-01', is_active: true }] };
   const page = compile(fs.readFileSync(path.join(root, 'src/pages/PublishedCouponsPage.tsx'), 'utf8'), {
     require: name => name === 'react' ? { ...React, useEffect() {}, useState: initial => [stateIndex++ === 0 ? data : initial, () => {}] } :
       name === 'react-router-dom' ? { ...router, useParams: () => ({ brandSlug }) } :
       name.includes('AuthContext') ? { useAuth: () => ({ user: { id: 'qa' } }) } :
-      name.includes('brandCatalog') ? catalogue : name.includes('countries') ? countries :
+      name.includes('BrandLogo') ? compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }) : name.includes('campaigns') ? { campaignBrand: row => ({ ...row, logoPath: row.logo_path, issuerCompanyId: row.issuer_company_id }) } : name.includes('brandCatalog') ? catalogue : name.includes('countries') ? countries :
       name.includes('exchangeRate') ? { formatCurrency: value => `INR ${value}` } :
       name.includes('useNow') ? { useNow: () => Date.parse('2026-10-15') } :
       name.includes('supabase') || name.endsWith('.css') || name.includes('LoadingPage') ? {} : require(name),
@@ -240,9 +240,16 @@ test('brand cards show published coupon facts and never sell invented catalogue 
     require: name => name.includes('brandCatalog') ? brandCatalogue() : name.includes('BrandLogo') ? compile(fs.readFileSync(path.join(root, 'src/components/BrandLogo.tsx'), 'utf8'), { require }) : name.includes('exchangeRate') ? { formatCurrency: value => `INR ${value}` } : name.includes('useNow') ? { useNow: () => Date.parse('2026-10-17') } : name.endsWith('.css') ? {} : require(name),
   });
   const offer = { id: 'authorized-offer', company_name: 'Amazon', country_code: 'IN', currency: 'INR', price: 450, value: 500, is_active: true, created_at: '2026-10-01', expiry_date: '2027-02-01', issue_limit: 30, issued_count: 7 };
-  const render = props => renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { search: 'Amazon', countryCode: 'IN', currency: 'INR', ...props })));
+  const render = props => renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(exports.default, { brands: brandCatalogue().CATALOGUE_BRANDS, search: 'Amazon', countryCode: 'IN', currency: 'INR', ...props })));
   const html = render({ offers: [offer] }); assert.ok(html.includes('/coupon/authorized-offer')); assert.ok(html.includes('INR 500')); assert.ok(html.includes('INR 450')); assert.match(html, /Feb 1, 2027/); assert.match(html, /<dd>23<\/dd>/); assert.doesNotMatch(html, /Demo|Sample|INR 2000/);
   for (const changes of [{ countryCode: 'US' }, { offers: [{ ...offer, issued_count: 30 }] }, { inventoryError: true }]) {
     const unavailable = render({ offers: [offer], ...changes }); assert.equal(unavailable.includes('/coupon/authorized-offer'), false); assert.equal(unavailable.includes('INR 500'), false); assert.ok(unavailable.includes('/brand/amazon/offers'));
   }
+});
+test('database campaign issuer binding uses its company ID and never a matching display name', () => {
+  const { getPublishedOffers } = brandCatalogue(); const now = Date.parse('2026-10-21');
+  const offer = { id: 'a', company_id: 'merchant-a', company_name: 'Amazon', country_code: 'IN', currency: 'INR', price: 10, value: 20, is_active: true, expiry_date: '2027-01-01' };
+  assert.equal(getPublishedOffers([offer], 'IN', 'INR', now, { name: 'Amazon', issuerCompanyId: null }).length, 0);
+  assert.equal(getPublishedOffers([offer], 'IN', 'INR', now, { name: 'Amazon', issuerCompanyId: 'merchant-b' }).length, 0);
+  assert.equal(getPublishedOffers([offer], 'IN', 'INR', now, { name: 'Renamed campaign', issuerCompanyId: 'merchant-a' }).length, 1);
 });

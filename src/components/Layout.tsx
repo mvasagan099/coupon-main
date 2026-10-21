@@ -72,7 +72,7 @@ export function Layout({ children }: LayoutProps = {}) {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 md:gap-4">
+            <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-4">
               {/* Mobile Actions (Visible only on small screens) */}
               <div className="flex md:hidden items-center gap-2">
                 <span className={`${portalBadgeClass} font-bold text-[10px]`}>
