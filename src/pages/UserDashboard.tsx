@@ -763,7 +763,7 @@ export default function UserDashboard() {
 
                   return (
                     <Link key={card.id} to={`/dashboard/marketplace/coupon/${card.id}`} aria-label={`View ${card.title} coupon details`} className="card card-hover card-lift marketplace-card" style={{ padding: '1rem', position: 'relative', textDecoration: 'none', color: 'inherit' }}>
-                      <div className="img-zoom"
+                      <div className="img-zoom marketplace-card-banner"
                         style={{
                           minHeight: '220px',
                           borderRadius: '24px',
@@ -785,16 +785,16 @@ export default function UserDashboard() {
                             zIndex: 0
                           }}
                         />
-                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, rgba(25,28,29,0.55), rgba(25,28,29,0.85))', zIndex: 1 }} />
-                        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 50%)', pointerEvents: 'none', borderRadius: '24px', zIndex: 2 }} />
+                        <div className="marketplace-card-overlay" />
+                        <div className="marketplace-card-sheen" />
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', position: 'relative', zIndex: 3 }}>
-                          <span className="badge" style={{ background: 'rgba(128,249,200,0.2)', color: '#fff', backdropFilter: 'blur(8px)' }}>
+                          <span className="badge marketplace-card-badge">
                             Save {savingsPct}%
                           </span>
                         </div>
                         <div style={{ position: 'relative', zIndex: 3 }}>
-                          <div style={{ fontSize: '1.35rem', fontWeight: 800 }}>{card.title}</div>
-                          <div style={{ color: 'rgba(255,255,255,0.78)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <div className="marketplace-card-title">{card.title}</div>
+                          <div className="marketplace-card-subtitle">
                             <Zap size={14} /> {formatCurrency(prc, userCurrency)} now, value {formatCurrency(val, userCurrency)}
                           </div>
                         </div>

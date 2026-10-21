@@ -2795,9 +2795,9 @@ html {
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(ellipse 80% 60% at 10% 20%, rgba(124, 58, 237, 0.08), transparent),
-    radial-gradient(ellipse 60% 50% at 90% 30%, rgba(59, 130, 246, 0.06), transparent),
-    radial-gradient(ellipse 70% 40% at 50% 80%, rgba(16, 185, 129, 0.04), transparent);
+    radial-gradient(ellipse 80% 60% at 10% 20%, rgba(124, 58, 237, 0.09), transparent),
+    radial-gradient(ellipse 60% 50% at 90% 30%, rgba(59, 130, 246, 0.08), transparent),
+    radial-gradient(ellipse 70% 40% at 50% 80%, rgba(16, 185, 129, 0.06), transparent);
 }
 
 /* Subtle dot-grid overlay for depth */
@@ -2811,19 +2811,34 @@ html {
   pointer-events: none;
 }
 
-/* Single subtle floating orb (reduced from 3) */
+/* Floating Aurora Orbs */
 .aurora-orb {
   position: fixed;
   border-radius: 50%;
-  filter: blur(60px);
+  filter: blur(65px);
   pointer-events: none;
   z-index: 0;
-  opacity: 0.2;
+  opacity: 0.65;
   will-change: transform;
 }
 
-.aurora-orb--1 { width: 300px; height: 300px; background: rgba(124, 58, 237, 0.10); top: -80px; right: -40px; animation: auroraFloat 20s ease-in-out infinite; }
-.aurora-orb--2 { width: 250px; height: 250px; background: rgba(16, 185, 129, 0.08); bottom: 5%; left: -60px; animation: auroraFloat 25s ease-in-out infinite 2s; }
+.aurora-orb--1 {
+  width: 420px;
+  height: 420px;
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.13) 0%, rgba(79, 99, 245, 0.05) 60%, transparent 80%);
+  top: -80px;
+  right: -40px;
+  animation: auroraFloat 20s ease-in-out infinite;
+}
+
+.aurora-orb--2 {
+  width: 360px;
+  height: 360px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.11) 0%, rgba(6, 182, 212, 0.05) 60%, transparent 80%);
+  bottom: 5%;
+  left: -60px;
+  animation: auroraFloat 25s ease-in-out infinite 2s;
+}
 
 @keyframes auroraFloat {
   0%, 100% { transform: translate(0, 0); }
@@ -3259,6 +3274,58 @@ select.input option {
   transform: scale(1.06);
 }
 
+/* Responsive Marketplace Card Banner Overlay */
+.marketplace-card-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  /* Light theme: clean bottom scrim so preset graphics pop brightly while text remains high-contrast */
+  background: linear-gradient(
+    180deg,
+    rgba(15, 23, 42, 0.02) 0%,
+    rgba(15, 23, 42, 0.20) 45%,
+    rgba(15, 23, 42, 0.72) 100%
+  );
+  transition: background 0.3s ease;
+}
+
+.marketplace-card-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  pointer-events: none;
+  z-index: 2;
+  /* Light theme: crisp subtle top-edge glass sheen */
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0%, transparent 50%);
+  transition: background 0.3s ease;
+}
+
+.marketplace-card-badge {
+  background: rgba(15, 23, 42, 0.45);
+  color: #80f9c8;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(128, 249, 200, 0.35);
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: all 0.25s ease;
+}
+
+.marketplace-card-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.marketplace-card-subtitle {
+  color: rgba(255, 255, 255, 0.88);
+  margin-top: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
 /* Quick stat value animation */
 .stat-value {
   transition: all 0.3s ease;
@@ -3584,6 +3651,39 @@ select.input option {
 
 [data-theme="dark"] .aurora-orb {
   opacity: 0.30;
+}
+
+[data-theme="dark"] .aurora-orb--1 {
+  width: 300px;
+  height: 300px;
+  background: rgba(124, 58, 237, 0.10);
+  top: -80px;
+  right: -40px;
+}
+
+[data-theme="dark"] .aurora-orb--2 {
+  width: 250px;
+  height: 250px;
+  background: rgba(16, 185, 129, 0.08);
+  bottom: 5%;
+  left: -60px;
+}
+
+/* Dark theme marketplace card overlay & sheen (EXACT original styles preserved) */
+[data-theme="dark"] .marketplace-card-overlay {
+  background: linear-gradient(160deg, rgba(25, 28, 29, 0.55), rgba(25, 28, 29, 0.85));
+}
+
+[data-theme="dark"] .marketplace-card-sheen {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, transparent 50%);
+}
+
+[data-theme="dark"] .marketplace-card-badge {
+  background: rgba(128, 249, 200, 0.20);
+  color: #fff;
+  border-color: transparent;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* Dark-mode toggle button */
