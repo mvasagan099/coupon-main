@@ -6,6 +6,110 @@
 .background-preset span { display: block; padding: .5rem; font-size: .75rem; font-weight: 650; }
 .background-preset[aria-pressed="true"] { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan); }
 .background-preset:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+
+/* Plus Banner Card for Custom Background */
+.background-preset-plus {
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  border: 2px dashed rgba(56, 189, 248, 0.45);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.05) 0%, rgba(168, 85, 247, 0.05) 100%), var(--surface-soft);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  user-select: none;
+}
+.background-preset-plus:hover {
+  border-color: var(--cyan, #38bdf8);
+  border-style: solid;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(168, 85, 247, 0.12) 100%), var(--surface-soft);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -4px rgba(56, 189, 248, 0.25);
+}
+.background-preset-plus.is-active,
+.background-preset-plus[aria-pressed="true"] {
+  border-color: var(--cyan, #38bdf8);
+  border-style: solid;
+  box-shadow: 0 0 0 1px var(--cyan, #38bdf8), 0 8px 20px -4px rgba(56, 189, 248, 0.35);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%), var(--surface-soft);
+}
+.background-preset-plus-inner {
+  width: 100%;
+  aspect-ratio: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.background-preset-plus-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  text-align: center;
+}
+.plus-icon-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: var(--cyan, #38bdf8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.background-preset-plus:hover .plus-icon-circle {
+  transform: scale(1.12);
+  background: rgba(56, 189, 248, 0.25);
+  color: #fff;
+}
+.plus-action-text {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+}
+.plus-sub-text {
+  font-size: 0.65rem;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.background-preset-plus-preview {
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0.5rem;
+  position: relative;
+}
+.background-preset-plus-badge {
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  color: var(--cyan, #38bdf8);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.background-preset-label {
+  display: block;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--cyan, #38bdf8);
+}
+
 .card-background-picker:disabled { opacity: .65; }
 .coupon-background-editor { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--border); }
 .coupon-background-editor summary { cursor: pointer; font-weight: 650; margin-bottom: .8rem; }
