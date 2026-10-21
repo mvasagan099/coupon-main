@@ -24,7 +24,7 @@ export interface CountryInfo {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const COUNTRY_LIST: CountryInfo[] = [
-  { code: 'IN', name: 'India',                currency: 'INR', currencySymbol: '₹',   phoneCode: '+91',  timezone: 'Asia/Kolkata',          gatewayPriority: ['razorpay', 'paypal'] },
+  { code: 'IN', name: 'India',                currency: 'INR', currencySymbol: '₹',   phoneCode: '+91',  timezone: 'Asia/Kolkata',          gatewayPriority: ['razorpay', 'stripe'] },
   { code: 'US', name: 'United States',        currency: 'USD', currencySymbol: '$',   phoneCode: '+1',   timezone: 'America/New_York',       gatewayPriority: ['stripe', 'paypal'] },
   { code: 'GB', name: 'United Kingdom',       currency: 'GBP', currencySymbol: '£',   phoneCode: '+44',  timezone: 'Europe/London',          gatewayPriority: ['stripe', 'paypal'] },
   { code: 'AE', name: 'United Arab Emirates', currency: 'AED', currencySymbol: 'AED', phoneCode: '+971', timezone: 'Asia/Dubai',             gatewayPriority: ['stripe', 'paypal'] },
@@ -42,7 +42,7 @@ const DEFAULT_COUNTRY: CountryInfo = {
   currencySymbol: '$',
   phoneCode: '+1',
   timezone: 'UTC',
-  gatewayPriority: ['paypal', 'stripe'],
+  gatewayPriority: ['stripe', 'paypal'],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

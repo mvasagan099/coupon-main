@@ -30,7 +30,7 @@ function flagEmoji(code: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RAW_COUNTRIES = [
-  { code: 'IN', name: 'India',                currency: 'INR', currencySymbol: '₹',   phoneCode: '+91',  timezone: 'Asia/Kolkata',          gatewayPriority: ['razorpay', 'paypal'] },
+  { code: 'IN', name: 'India',                currency: 'INR', currencySymbol: '₹',   phoneCode: '+91',  timezone: 'Asia/Kolkata',          gatewayPriority: ['razorpay', 'stripe'] },
   { code: 'US', name: 'United States',        currency: 'USD', currencySymbol: '$',   phoneCode: '+1',   timezone: 'America/New_York',       gatewayPriority: ['stripe', 'paypal'] },
   { code: 'GB', name: 'United Kingdom',       currency: 'GBP', currencySymbol: '£',   phoneCode: '+44',  timezone: 'Europe/London',          gatewayPriority: ['stripe', 'paypal'] },
   { code: 'AE', name: 'United Arab Emirates', currency: 'AED', currencySymbol: 'AED', phoneCode: '+971', timezone: 'Asia/Dubai',             gatewayPriority: ['stripe', 'paypal'] },
@@ -49,7 +49,7 @@ const BY_CODE = new Map<string, CountryInfo>(COUNTRIES.map((c) => [c.code, c]));
 
 const DEFAULT: CountryInfo = {
   code: 'US', name: 'United States', currency: 'USD', currencySymbol: '$',
-  phoneCode: '+1', timezone: 'UTC', flag: '🇺🇸', gatewayPriority: ['paypal', 'stripe'],
+  phoneCode: '+1', timezone: 'UTC', flag: '🇺🇸', gatewayPriority: ['stripe', 'paypal'],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

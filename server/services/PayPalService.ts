@@ -112,7 +112,13 @@ export class PayPalService implements PaymentServiceI {
 
   async verifyPayment(input: VerifyPaymentInput): Promise<VerifyPaymentResult> {
     const { gatewayOrderId } = input;
-    const order = await this.paypalFetch<any>(`/v2/checkout/orders/${gatewayOrderId}`);
+    let order = await this.paypalFetch<any>(`/v2/checkout/orders/${gatewayOrderId}`);
+
+    // Customer has approved checkout; capture the payment to finalize it
+    if (order.status === 'APPROVED') {
+      await this.capturePayment(gatewayOrderId);
+      order = await this.paypalFetch<any>(`/v2/checkout/orders/${gatewayOrderId}`);
+    }
 
     if (order.status !== 'COMPLETED') {
       throw new Error(`PayPal order ${gatewayOrderId} is not COMPLETED (status: ${order.status}).`);

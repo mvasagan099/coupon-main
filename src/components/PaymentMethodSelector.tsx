@@ -119,11 +119,13 @@ export default function PaymentMethodSelector({
   const options = useMemo<PaymentOption[]>(() => {
     const priorityOrder = countryCode
       ? getGatewaysForCountry(countryCode)
-      : ['paypal', 'stripe'] as PaymentGateway[];
+      : ['stripe', 'paypal'] as PaymentGateway[];
 
     const currency = userCurrency ?? (countryCode === 'IN' ? 'INR' : 'USD');
 
-    return priorityOrder.filter(gateway => gateway !== 'paypal' || currency !== 'INR' && currency !== 'AED').map((gwId, idx) => {
+    return priorityOrder
+      .filter(gateway => (gateway !== 'paypal' || (currency !== 'INR' && currency !== 'AED')) && (gateway !== 'razorpay' || currency === 'INR'))
+      .map((gwId, idx) => {
       const base = ALL_OPTIONS[gwId];
       let description = '';
       switch (gwId) {

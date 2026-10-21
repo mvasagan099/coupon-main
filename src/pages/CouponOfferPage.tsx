@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { StripeElements, StripePaymentElement } from '@stripe/stripe-js';
 import { ArrowLeft, ShieldCheck, Wallet, CreditCard, Zap, RefreshCw } from 'lucide-react';
@@ -8,7 +8,8 @@ import { LoadingPage } from '../components/LoadingPage';
 import { getCouponOfferDetails, getUserProfileData, purchaseGiftCardOnce } from '../lib/supabase';
 import type { CouponOfferDetails } from '../lib/supabase';
 import { formatCurrency } from '../lib/exchangeRate';
-import { getCountryByCode } from '../lib/countries';
+import { getCountryByCode, getGatewaysForCountry } from '../lib/countries';
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import { cardBackgroundImage } from '../lib/cardBackgrounds';
 import { formatOfferDate, offerUnavailable } from '../lib/couponOffer';
 import { useNow } from '../hooks/useNow';
@@ -31,10 +32,15 @@ function CouponOffer({ id }: { id: string }) {
   const navigate = useNavigate();
   const now = useNow();
   const [details, setDetails] = useState<CouponOfferDetails | null>(null);
+  const card = details?.coupon;
+  const unavailable = card ? offerUnavailable(card, now) : 'Coupon unavailable.';
+  const currency = card?.currency || 'INR';
+  const money = (amount: number) => formatCurrency(amount, currency);
+
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [gateways, setGateways] = useState<PaymentGateway[]>([]);
+  const [availableGateways, setAvailableGateways] = useState<PaymentGateway[]>([]);
   const [gatewayConfig, setGatewayConfig] = useState<Record<string, GatewayPublicConfig>>({});
   const [gateway, setGateway] = useState<PaymentGateway>('razorpay');
   const [optionsError, setOptionsError] = useState('');
@@ -62,6 +68,16 @@ function CouponOffer({ id }: { id: string }) {
     setPending(saved);
   };
 
+  const gateways = useMemo(() => {
+    const countryCode = card?.country_code || 'IN';
+    const priority = getGatewaysForCountry(countryCode);
+    return [...availableGateways].sort((a, b) => {
+      const ia = priority.indexOf(a);
+      const ib = priority.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  }, [availableGateways, card?.country_code]);
+
   useEffect(() => {
     let active = true;
     Promise.all([getCouponOfferDetails(id), getUserProfileData(user!.id)]).then(([offer, profile]) => {
@@ -80,10 +96,9 @@ function CouponOffer({ id }: { id: string }) {
         if (g === 'paypal') return true;
         return false;
       });
-      setGateways(enabled);
+      setAvailableGateways(enabled);
       if (enabled.length > 0) {
-        const pref = (enabled.includes('razorpay')) ? 'razorpay' : enabled[0];
-        setGateway(pref);
+        setGateway(enabled[0]);
       }
     }).catch(() => { if (active) setOptionsError('Direct payment is temporarily unavailable. You can still pay from your wallet.'); });
     return () => { active = false; };
@@ -137,11 +152,6 @@ function CouponOffer({ id }: { id: string }) {
     try { await action(); } catch (error) { toastError('Checkout', errorMessage(error)); }
     finally { busyRef.current = false; setBusy(false); }
   };
-  const card = details?.coupon;
-  const unavailable = card ? offerUnavailable(card, now) : 'Coupon unavailable.';
-  const currency = card?.currency || 'INR';
-  const money = (amount: number) => formatCurrency(amount, currency);
-
   const resume = async (saved: SavedCheckout): Promise<GatewayCreateResponse | null> => {
     const result = await recoverCouponPayment(saved.gateway, saved.orderId);
     if (result.state === 'paid') { finish(result); return null; }
@@ -236,7 +246,17 @@ function CouponOffer({ id }: { id: string }) {
   if (loading) return <LoadingPage message="Loading coupon details…" />;
   if (loadError || !details || !card) return <section className="coupon-offer-page"><Link to="/dashboard/marketplace" className="btn btn-secondary">Back to marketplace</Link><div className="card offer-section"><h1>Coupon unavailable</h1><p role="alert">{loadError || 'This coupon is not available for your country, or has been removed.'}</p><button className="btn btn-secondary" onClick={() => window.location.reload()}>Try again</button></div></section>;
 
-  return <section className="coupon-offer-page">
+  return (
+    <PayPalScriptProvider
+      key={currency}
+      options={{
+        clientId: gatewayConfig.paypal?.clientId || import.meta.env.VITE_PAYPAL_CLIENT_ID || 'test',
+        currency: currency,
+        intent: 'capture',
+      }}
+      deferLoading={!currency || ['INR', 'AED'].includes(currency)}
+    >
+      <section className="coupon-offer-page">
     <Link to="/dashboard/marketplace" className="offer-back"><ArrowLeft size={17} /> Back to marketplace</Link>
     <header className="offer-hero" style={{backgroundImage:cardBackgroundImage(card.banner_image,true)}}>
       <span className="section-label">{details.company.name}</span><h1>{card.title}</h1><p>{money(card.price)} <span>· Coupon value {money(card.value)}</span></p>
@@ -266,7 +286,13 @@ function CouponOffer({ id }: { id: string }) {
                     type="button"
                     disabled={busy}
                     className={`offer-gateway-option ${gateway === g ? 'active' : ''}`}
-                    onClick={() => setGateway(g)}
+                    onClick={() => {
+                      if (gateway !== g) {
+                        setGateway(g);
+                        setOrder(null);
+                        setStripeReady(false);
+                      }
+                    }}
                   >
                     <div className="offer-gw-content">
                       <span className="offer-gw-title">
@@ -301,7 +327,40 @@ function CouponOffer({ id }: { id: string }) {
             </div>
           )}
           {pending && <p className="offer-note" role="status">You have a saved checkout. Resume or verify this payment before paying again.</p>}
-          {gateways.length > 0 && (!order || order.gateway !== 'stripe') && (
+          {!pending && gateway === 'paypal' && !['INR', 'AED'].includes(currency) && (
+            <div className="offer-paypal-box" style={{ marginTop: '0.75rem' }}>
+              <PayPalButtons
+                style={{ layout: "vertical", color: "blue", shape: "rect", label: "pay" }}
+                disabled={busy || !card || !!unavailable}
+                createOrder={async () => {
+                  if (!card) throw new Error('Offer unavailable.');
+                  const next = await createCouponPayment('paypal', card.id, Number(card.price));
+                  savePending({ gateway: 'paypal', orderId: next.orderId });
+                  setOrder(next);
+                  return next.orderId;
+                }}
+                onApprove={async (data) => {
+                  setBusy(true);
+                  try {
+                    const result = await recoverCouponPayment('paypal', data.orderID);
+                    if (result.state === 'paid') {
+                      finish(result);
+                    } else {
+                      toastError('Payment verification pending', 'Please click "Verify payment" to confirm your order.');
+                    }
+                  } catch (err: unknown) {
+                    toastError('Payment pending', errorMessage(err));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onError={(err) => {
+                  toastError('PayPal payment failed', errorMessage(err) || 'Payment was not confirmed. Please retry.');
+                }}
+              />
+            </div>
+          )}
+          {gateways.length > 0 && (pending || gateway !== 'paypal') && (!order || order.gateway !== 'stripe' || gateway !== 'stripe') && (
             <button
               className="btn btn-secondary offer-wide offer-direct-btn"
               disabled={busy || !!walletRequestId || (!pending && (!!unavailable || !gateways.length))}
@@ -313,17 +372,28 @@ function CouponOffer({ id }: { id: string }) {
                 </span>
               ) : pending ? (
                 'Resume direct payment'
+              ) : gateway === 'razorpay' ? (
+                `Pay with Razorpay · ${money(card.price)}`
               ) : (
-                `Pay directly · ${money(card.price)}`
+                `Pay with Card (Stripe) · ${money(card.price)}`
               )}
             </button>
           )}
-          {order?.gateway === 'stripe' && <div><div ref={stripeContainer} className="offer-stripe"/><button className="btn btn-primary offer-wide" disabled={busy || !stripeReady} onClick={() => void payStripe()}>{busy ? 'Verifying payment…' : `Pay ${money(order.amount / 100)}`}</button></div>}
+          {gateway === 'stripe' && order?.gateway === 'stripe' && (
+            <div>
+              <div ref={stripeContainer} className="offer-stripe"/>
+              <button className="btn btn-primary offer-wide" disabled={busy || !stripeReady} onClick={() => void payStripe()}>
+                {busy ? 'Verifying payment…' : `Pay ${money(order.amount / 100)}`}
+              </button>
+            </div>
+          )}
           {pending && <><button className="btn btn-secondary offer-wide" disabled={busy} onClick={() => void run(async () => {const result = await recoverCouponPayment(pending.gateway,pending.orderId);if (result.state === 'paid') finish(result); else if(result.state === 'cancelled'){savePending(null);setOrder(null);}else toastError('Payment not completed','Resume your saved checkout, or verify again if payment is processing.');})}>Verify payment</button><button className="btn btn-secondary offer-wide" disabled={busy} onClick={() => void cancelDirect()}>Cancel direct checkout</button><p className="offer-note">If a delayed payment arrives after cancellation, it will be kept in your wallet.</p></>}
           <p className="offer-note">If this offer sells out or changes during payment, the full amount will be saved to your wallet. We never issue a different coupon automatically.</p>
         </div>}
         <p className="offer-trust"><ShieldCheck size={17}/> Payments are verified securely before a coupon is issued.</p>
       </aside>
     </div>
-  </section>;
+  </section>
+  </PayPalScriptProvider>
+  );
 }
