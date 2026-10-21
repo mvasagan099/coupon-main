@@ -57,6 +57,7 @@ export interface Company {
   ifsc_code?: string;
   document_url?: string;
   owner_id?: string;
+  logo_url?: string;
 }
 
 export interface Withdrawal {
@@ -103,7 +104,17 @@ export interface Coupon {
   id: string;
   company_id: string;
   company_name?: string;
+  company_address?: string;
+  company_prefix?: string;
+  company_status?: string;
+  company_logo_url?: string;
   gift_card_id?: string;
+  card_title?: string;
+  card_description?: string;
+  card_banner?: string;
+  card_value?: number;
+  card_price?: number;
+  card_terms?: string;
   code: string;
   is_used: boolean;
   issued_to: string | null;
@@ -113,6 +124,7 @@ export interface Coupon {
   status: 'active' | 'redeemed' | 'expired';
   redeemed_at?: string;
   country_code?: string;
+  amount?: number;
 }
 
 export interface RedemptionTransaction {
@@ -709,19 +721,50 @@ export async function getUserOrders(userId: string) {
 export async function getUserGiftCards(userId: string): Promise<Coupon[]> {
   try {
     if (!isSupabaseConfigured || hasTimedOut) throw new Error("Failing fast for local mock");
-    const { data, error } = await withTimeout(
-      supabase
-        .from("coupons")
-        .select("*, companies(name)")
-        .eq("issued_to", userId)
-        .order("created_at", { ascending: false }),
-      8000
-    );
-    if (error) throw error;
-    
-    const dbCoupons = (data ?? []).map(d => ({
+    let data: any[] | null = null;
+    let error: any = null;
+
+    try {
+      const res = await withTimeout(
+        supabase
+          .from("coupons")
+          .select("*, companies(name, address, prefix, status, logo_url), gift_cards(title, description, banner_image, value, price, terms)")
+          .eq("issued_to", userId)
+          .order("created_at", { ascending: false }),
+        8000
+      );
+      data = res.data;
+      error = res.error;
+    } catch (e: any) {
+      error = e;
+    }
+
+    if (error) {
+      const fallback = await withTimeout(
+        supabase
+          .from("coupons")
+          .select("*, companies(name)")
+          .eq("issued_to", userId)
+          .order("created_at", { ascending: false }),
+        8000
+      );
+      if (fallback.error) throw fallback.error;
+      data = fallback.data;
+    }
+
+    const dbCoupons: Coupon[] = (data ?? []).map((d: any) => ({
       ...d,
-      company_name: d.companies?.name
+      company_name: d.companies?.name || d.company_name,
+      company_address: d.companies?.address,
+      company_prefix: d.companies?.prefix,
+      company_status: d.companies?.status,
+      company_logo_url: d.companies?.logo_url,
+      card_title: d.gift_cards?.title,
+      card_description: d.gift_cards?.description,
+      card_banner: d.gift_cards?.banner_image,
+      card_value: d.gift_cards?.value,
+      card_price: d.gift_cards?.price,
+      card_terms: d.gift_cards?.terms,
     }));
 
     return dbCoupons;
@@ -730,12 +773,24 @@ export async function getUserGiftCards(userId: string): Promise<Coupon[]> {
     console.warn("[CouponVault] getUserGiftCards failed, falling back to LocalStorage:", err.message);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
+    const localGiftCards = getLocal<GiftCard[]>("cv_gift_cards", []);
     const userCoupons = coupons.filter(c => c.issued_to === userId);
     return userCoupons.map(c => {
       const co = companies.find(comp => comp.id === c.company_id);
+      const gc = localGiftCards.find(g => g.id === c.gift_card_id);
       return {
         ...c,
-        company_name: co ? co.name : "Unknown Brand"
+        company_name: co ? co.name : "Unknown Brand",
+        company_address: co?.address,
+        company_prefix: co?.prefix,
+        company_status: co?.status,
+        company_logo_url: co?.logo_url,
+        card_title: gc?.title,
+        card_description: gc?.description,
+        card_banner: gc?.banner_image,
+        card_value: gc?.value,
+        card_price: gc?.price,
+        card_terms: gc?.terms,
       };
     });
   }

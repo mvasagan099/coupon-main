@@ -3342,6 +3342,31 @@ select.input option {
   letter-spacing: 0.04em;
 }
 
+/* Stored Voucher Card Styles */
+.voucher-card-item {
+  position: relative;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease;
+}
+
+.voucher-card-item:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 34px rgba(79, 99, 245, 0.16);
+  border-color: rgba(79, 99, 245, 0.32);
+}
+
+.voucher-card-bg {
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.voucher-card-item:hover .voucher-card-bg {
+  transform: scale(1.06);
+}
+
+[data-theme="dark"] .voucher-card-item:hover {
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+  border-color: rgba(79, 99, 245, 0.4);
+}
+
 /* =============================================
    SPEC-DRIVEN ADDITIONS — Modern Fintech SaaS UI
    @keyframes aurora, .soft-input, .bento-grid,

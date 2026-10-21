@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark } from 'lucide-react';
+import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark, Copy, MapPin, QrCode } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
@@ -64,6 +64,16 @@ function cleanPaymentMethod(method?: string): string {
     .replace(/lottery\s+winnings?/gi, 'Winning Transfer')
     .replace(/\blottery\b/gi, '')
     .trim() || 'Wallet Top-up';
+}
+
+function getMonogram(name?: string): string {
+  if (!name) return 'CV';
+  const clean = name.trim().toUpperCase();
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0]).substring(0, 2);
+  }
+  return clean.substring(0, 2);
 }
 
 export default function UserDashboard() {
@@ -687,6 +697,61 @@ export default function UserDashboard() {
     const fromRedemptions = redemptions.reduce((acc, r) => acc + (r.amount ?? 0), 0);
     return Math.max(fromVouchers, fromRedemptions);
   }, [userVouchers, giftCards, redemptions]);
+
+  const resolveVoucherMeta = useCallback((voucher: Coupon) => {
+    const parentCard = giftCards.find((g) => g.id === voucher.gift_card_id);
+    const bannerImage = voucher.card_banner || parentCard?.banner_image || DEFAULT_CARD_BACKGROUND;
+    const title = voucher.card_title || parentCard?.title || `${voucher.company_name || 'Gift'} Voucher`;
+    const companyName = voucher.company_name || parentCard?.company_name || 'Brand Partner';
+    const description = voucher.card_description || parentCard?.description || '';
+    const faceValue = voucher.card_value ?? parentCard?.value ?? voucher.amount;
+    const address = voucher.company_address;
+    const prefix = voucher.company_prefix;
+    const logoUrl = voucher.company_logo_url;
+    const terms = voucher.card_terms || parentCard?.terms;
+
+    return {
+      parentCard,
+      bannerImage,
+      title,
+      companyName,
+      description,
+      faceValue,
+      address,
+      prefix,
+      logoUrl,
+      terms,
+    };
+  }, [giftCards]);
+
+  const copyVoucherCode = async (code: string) => {
+    let successCopy = false;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+        successCopy = true;
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = code;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        successCopy = document.execCommand('copy');
+        textArea.remove();
+      }
+    } catch {
+      // fallback
+    }
+
+    if (successCopy) {
+      success('Copied coupon code', 'Code copied to clipboard.');
+    } else {
+      success('Code ready', 'Please select and copy the code manually.');
+    }
+  };
 
   return (
     <PayPalScriptProvider key={userCurrency} deferLoading={!userCountryCode || ["INR", "AED"].includes(userCurrency)} options={{ clientId: import.meta.env.VITE_PAYPAL_CLIENT_ID || "test", currency: userCurrency, intent: "capture" }}>
@@ -1398,49 +1463,253 @@ export default function UserDashboard() {
                 <>
                   {slicedCards.length > 0 ? (
                     <div className="responsive-grid-3">
-                      {slicedCards.map((voucher) => (
-                        <div
-                          key={voucher.id}
-                          className="glass-card-glow"
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
-                          onClick={() => setActiveVoucher(voucher)}
-                          style={{ padding: '1rem', textAlign: 'left', cursor: 'pointer' }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
-                            <div>
-                              <div className="section-label" style={{ marginBottom: '0.3rem' }}>
-                                <Gift size={12} style={{ display: 'inline', marginRight: '0.25rem', verticalAlign: 'middle' }} />
-                                {voucher.company_name || 'Brand partner'}
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <div style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: '0.92rem', letterSpacing: '0.02em' }}>
-                                  {visibleCodes[voucher.id] ? voucher.code : '••••••••••••'}
+                      {slicedCards.map((voucher) => {
+                        const meta = resolveVoucherMeta(voucher);
+                        const isCodeVisible = !!visibleCodes[voucher.id];
+                        return (
+                          <div
+                            key={voucher.id}
+                            className="glass-card-glow voucher-card-item"
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
+                            onClick={() => setActiveVoucher(voucher)}
+                            style={{
+                              borderRadius: '22px',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              border: '1.5px solid var(--border)',
+                            }}
+                          >
+                            {/* Card Artwork & Brand Banner */}
+                            <div
+                              style={{
+                                minHeight: '135px',
+                                position: 'relative',
+                                padding: '1rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                overflow: 'hidden',
+                                color: '#fff',
+                              }}
+                            >
+                              <div
+                                className="voucher-card-bg"
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  background: `url(${JSON.stringify(normalizeCardBackground(meta.bannerImage) ?? DEFAULT_CARD_BACKGROUND)}) center/cover`,
+                                  zIndex: 0,
+                                }}
+                              />
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  background: 'linear-gradient(180deg, rgba(10,14,23,0.35) 0%, rgba(10,14,23,0.80) 100%)',
+                                  zIndex: 1,
+                                }}
+                              />
+
+                              {/* Top row: Brand Logo & Status */}
+                              <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
+                                  {meta.logoUrl ? (
+                                    <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#fff', padding: '3px', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', display: 'grid', placeItems: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                                      <img src={meta.logoUrl} alt={`${meta.companyName} logo`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                    </div>
+                                  ) : (
+                                    <div
+                                      style={{
+                                        width: '36px',
+                                        height: '36px',
+                                        borderRadius: '10px',
+                                        background: 'linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(220,230,250,0.88) 100%)',
+                                        color: '#0f172a',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        fontWeight: 900,
+                                        fontSize: '0.82rem',
+                                        letterSpacing: '0.04em',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+                                        border: '1px solid rgba(255,255,255,0.6)',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {getMonogram(meta.companyName)}
+                                    </div>
+                                  )}
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                      <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', letterSpacing: '0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
+                                        {meta.companyName}
+                                      </span>
+                                      <ShieldCheck size={14} style={{ color: '#80f9c8', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))', flexShrink: 0 }} />
+                                    </div>
+                                    {meta.prefix && (
+                                      <span style={{ fontSize: '0.64rem', fontWeight: 700, color: 'rgba(255,255,255,0.82)', textShadow: '0 1px 2px rgba(0,0,0,0.6)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                        Node: {meta.prefix}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setVisibleCodes(prev => ({ ...prev, [voucher.id]: !prev[voucher.id] })); }}
-                                  style={{ background: 'rgba(255,255,255,0.4)', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px', borderRadius: '8px', display: 'flex' }}
-                                  type="button"
-                                >
-                                  {visibleCodes[voucher.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                                </button>
+
+                                <span className="badge badge-green" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.25)', fontSize: '0.72rem', textTransform: 'uppercase', flexShrink: 0 }}>
+                                  {voucher.status}
+                                </span>
+                              </div>
+
+                              {/* Bottom row of banner: Coupon Title & Value */}
+                              <div style={{ position: 'relative', zIndex: 2, marginTop: '0.65rem' }}>
+                                <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.7)', letterSpacing: '0.01em', lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {meta.title}
+                                </h4>
+                                {meta.faceValue != null && (
+                                  <span style={{ fontSize: '0.74rem', color: 'rgba(255,255,255,0.85)', textShadow: '0 1px 2px rgba(0,0,0,0.6)', fontWeight: 600 }}>
+                                    Initial value: {formatCurrency(meta.faceValue, userCurrency)}
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            <span className="badge badge-green">{voucher.status}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.35)' }}>
-                            <div>
-                              <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, fontSize: '1.05rem' }}>{formatCurrency(voucher.remaining_balance ?? 0, userCurrency)}</div>
+
+                            {/* Card Content & Details */}
+                            <div style={{ padding: '0.9rem 1rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
+                              {meta.address && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-3)', fontSize: '0.75rem' }}>
+                                  <MapPin size={12} style={{ flexShrink: 0 }} />
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta.address}</span>
+                                </div>
+                              )}
+
+                              {/* Coupon Code Pill */}
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  background: 'var(--surface-soft)',
+                                  border: '1.5px solid var(--border)',
+                                  borderRadius: '12px',
+                                  padding: '0.45rem 0.65rem',
+                                  gap: '0.5rem',
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+                                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    CODE:
+                                  </span>
+                                  <span style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: '0.92rem', letterSpacing: '0.04em', color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {isCodeVisible ? voucher.code : '••••••••••••'}
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setVisibleCodes((prev) => ({ ...prev, [voucher.id]: !prev[voucher.id] }));
+                                    }}
+                                    aria-label={isCodeVisible ? "Hide coupon code" : "Reveal coupon code"}
+                                    title={isCodeVisible ? "Hide code" : "Reveal code"}
+                                    style={{
+                                      background: 'var(--surface-elevated)',
+                                      border: '1px solid var(--border)',
+                                      cursor: 'pointer',
+                                      color: 'var(--text-2)',
+                                      padding: '5px',
+                                      borderRadius: '8px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}
+                                    type="button"
+                                  >
+                                    {isCodeVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void copyVoucherCode(voucher.code);
+                                    }}
+                                    aria-label="Copy coupon code"
+                                    title="Copy code"
+                                    style={{
+                                      background: 'var(--surface-elevated)',
+                                      border: '1px solid var(--border)',
+                                      cursor: 'pointer',
+                                      color: 'var(--text-2)',
+                                      padding: '5px',
+                                      borderRadius: '8px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}
+                                    type="button"
+                                  >
+                                    <Copy size={13} />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Balance & Expiry */}
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'flex-end',
+                                  paddingTop: '0.5rem',
+                                  borderTop: '1px solid var(--border-subtle)',
+                                }}
+                              >
+                                <div>
+                                  <div style={{ color: 'var(--text-3)', fontSize: '0.74rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                    Remaining
+                                  </div>
+                                  <div style={{ fontWeight: 800, fontSize: '1.15rem', color: 'var(--cyan)' }}>
+                                    {formatCurrency(voucher.remaining_balance ?? 0, userCurrency)}
+                                  </div>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <div style={{ color: 'var(--text-3)', fontSize: '0.74rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                    Expires
+                                  </div>
+                                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-2)' }}>
+                                    {new Date(voucher.expiry_date).toLocaleDateString()}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Scan & View Action */}
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  width: '100%',
+                                  marginTop: '0.25rem',
+                                  borderRadius: '10px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '0.4rem',
+                                  fontWeight: 600,
+                                  fontSize: '0.8rem',
+                                  padding: '0.45rem',
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveVoucher(voucher);
+                                }}
+                              >
+                                <QrCode size={14} /> Scan &amp; View Details
+                              </button>
                             </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <div style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>Expires</div>
-                              <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{new Date(voucher.expiry_date).toLocaleDateString()}</div>
-                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="glass-card-strong empty-state" style={{ padding: '1.5rem' }}>
@@ -1455,48 +1724,219 @@ export default function UserDashboard() {
                 <>
                   {slicedCards.length > 0 ? (
                     <div className="responsive-grid-3">
-                      {slicedCards.map((voucher) => (
-                        <div
-                          key={voucher.id}
-                          className="glass-card-strong"
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
-                          onClick={() => setActiveVoucher(voucher)}
-                          style={{ padding: '1rem', textAlign: 'left', opacity: 0.75, cursor: 'pointer' }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
-                            <div>
-                              <div className="section-label" style={{ marginBottom: '0.3rem', color: 'var(--text-4)' }}>
-                                {voucher.company_name || 'Brand partner'}
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <div style={{ fontWeight: 800, fontFamily: 'monospace', color: 'var(--text-3)', fontSize: '0.92rem' }}>
-                                  {visibleCodes[voucher.id] ? voucher.code : '••••••••••••'}
+                      {slicedCards.map((voucher) => {
+                        const meta = resolveVoucherMeta(voucher);
+                        const isCodeVisible = !!visibleCodes[voucher.id];
+                        const statusLabel = voucherState(voucher, now) === 'used' ? 'USED' : 'UNAVAILABLE';
+                        return (
+                          <div
+                            key={voucher.id}
+                            className="glass-card-strong voucher-card-item"
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => e.key === 'Enter' && setActiveVoucher(voucher)}
+                            onClick={() => setActiveVoucher(voucher)}
+                            style={{
+                              borderRadius: '22px',
+                              overflow: 'hidden',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              textAlign: 'left',
+                              opacity: 0.85,
+                              cursor: 'pointer',
+                              border: '1.5px solid var(--border)',
+                            }}
+                          >
+                            {/* Card Artwork & Brand Banner */}
+                            <div
+                              style={{
+                                minHeight: '120px',
+                                position: 'relative',
+                                padding: '1rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                overflow: 'hidden',
+                                color: '#fff',
+                              }}
+                            >
+                              <div
+                                className="voucher-card-bg"
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  background: `url(${JSON.stringify(normalizeCardBackground(meta.bannerImage) ?? DEFAULT_CARD_BACKGROUND)}) center/cover`,
+                                  filter: 'grayscale(60%)',
+                                  zIndex: 0,
+                                }}
+                              />
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  background: 'linear-gradient(180deg, rgba(10,14,23,0.5) 0%, rgba(10,14,23,0.88) 100%)',
+                                  zIndex: 1,
+                                }}
+                              />
+
+                              <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
+                                  {meta.logoUrl ? (
+                                    <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#fff', padding: '3px', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', display: 'grid', placeItems: 'center', overflow: 'hidden', flexShrink: 0 }}>
+                                      <img src={meta.logoUrl} alt={`${meta.companyName} logo`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                                    </div>
+                                  ) : (
+                                    <div
+                                      style={{
+                                        width: '34px',
+                                        height: '34px',
+                                        borderRadius: '10px',
+                                        background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(200,210,230,0.8) 100%)',
+                                        color: '#0f172a',
+                                        display: 'grid',
+                                        placeItems: 'center',
+                                        fontWeight: 900,
+                                        fontSize: '0.8rem',
+                                        letterSpacing: '0.04em',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {getMonogram(meta.companyName)}
+                                    </div>
+                                  )}
+                                  <div style={{ minWidth: 0 }}>
+                                    <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px', display: 'block' }}>
+                                      {meta.companyName}
+                                    </span>
+                                    {meta.prefix && (
+                                      <span style={{ fontSize: '0.64rem', fontWeight: 700, color: 'rgba(255,255,255,0.75)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                        Node: {meta.prefix}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setVisibleCodes(prev => ({ ...prev, [voucher.id]: !prev[voucher.id] })); }}
-                                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-4)', padding: 0, display: 'flex' }}
-                                  type="button"
-                                >
-                                  {visibleCodes[voucher.id] ? <EyeOff size={14} /> : <Eye size={14} />}
-                                </button>
+
+                                <span className="badge badge-gray" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.25)', fontSize: '0.72rem', textTransform: 'uppercase', flexShrink: 0 }}>
+                                  {statusLabel}
+                                </span>
+                              </div>
+
+                              <div style={{ position: 'relative', zIndex: 2, marginTop: '0.65rem' }}>
+                                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.7)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {meta.title}
+                                </h4>
                               </div>
                             </div>
-                            <span className="badge badge-gray">{voucherState(voucher, now) === 'used' ? 'USED' : 'UNAVAILABLE'}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '0.75rem 0 0', borderTop: '1.5px solid rgba(255,255,255,0.25)' }}>
-                            <div>
-                              <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Remaining</div>
-                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>{formatCurrency(voucher.remaining_balance ?? 0, userCurrency)}</div>
+
+                            {/* Card Content & Details */}
+                            <div style={{ padding: '0.9rem 1rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', flex: 1 }}>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  background: 'var(--surface-soft)',
+                                  border: '1px solid var(--border)',
+                                  borderRadius: '12px',
+                                  padding: '0.45rem 0.65rem',
+                                  gap: '0.5rem',
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', minWidth: 0 }}>
+                                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    CODE:
+                                  </span>
+                                  <span style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: '0.92rem', letterSpacing: '0.04em', color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {isCodeVisible ? voucher.code : '••••••••••••'}
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setVisibleCodes((prev) => ({ ...prev, [voucher.id]: !prev[voucher.id] }));
+                                    }}
+                                    aria-label={isCodeVisible ? "Hide coupon code" : "Reveal coupon code"}
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      color: 'var(--text-4)',
+                                      padding: '4px',
+                                      display: 'flex',
+                                    }}
+                                    type="button"
+                                  >
+                                    {isCodeVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void copyVoucherCode(voucher.code);
+                                    }}
+                                    aria-label="Copy coupon code"
+                                    style={{
+                                      background: 'none',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      color: 'var(--text-4)',
+                                      padding: '4px',
+                                      display: 'flex',
+                                    }}
+                                    type="button"
+                                  >
+                                    <Copy size={13} />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'flex-end',
+                                  paddingTop: '0.5rem',
+                                  borderTop: '1px solid var(--border-subtle)',
+                                }}
+                              >
+                                <div>
+                                  <div style={{ color: 'var(--text-4)', fontSize: '0.74rem' }}>Remaining</div>
+                                  <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>{formatCurrency(voucher.remaining_balance ?? 0, userCurrency)}</div>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <div style={{ color: 'var(--text-4)', fontSize: '0.74rem' }}>Expires</div>
+                                  <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>{new Date(voucher.expiry_date).toLocaleDateString()}</div>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  width: '100%',
+                                  marginTop: '0.25rem',
+                                  borderRadius: '10px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '0.4rem',
+                                  fontWeight: 600,
+                                  fontSize: '0.8rem',
+                                  padding: '0.45rem',
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveVoucher(voucher);
+                                }}
+                              >
+                                <QrCode size={14} /> View Details
+                              </button>
                             </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <div style={{ color: 'var(--text-4)', fontSize: '0.78rem' }}>Expires</div>
-                              <div style={{ fontWeight: 700, color: 'var(--text-3)' }}>{new Date(voucher.expiry_date).toLocaleDateString()}</div>
-                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="glass-card-strong empty-state" style={{ padding: '1.5rem' }}>
@@ -1539,81 +1979,199 @@ export default function UserDashboard() {
         </div>
       )}
 
-      {activeVoucher && createPortal(
-        <div className="glass-modal-overlay">
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '420px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', marginBottom: '1rem' }}>
-              <div>
-                <span className="section-label"><ShieldCheck size={13} style={{ display: 'inline', marginRight: '0.3rem', verticalAlign: 'middle' }} /> Ready to scan</span>
-                <h3 style={{ margin: '0.35rem 0 0', fontSize: '1.4rem', letterSpacing: '0.02em', wordSpacing: '0.08em', }}>
-                  {activeVoucher.company_name || 'Voucher'}
-                </h3>
-              </div>
-              <button className="btn btn-secondary btn-sm" onClick={() => setActiveVoucher(null)}>
-                Close
-              </button>
-            </div>
+      {activeVoucher && (() => {
+        const activeMeta = resolveVoucherMeta(activeVoucher);
+        const isCodeVisible = !!visibleCodes[activeVoucher.id];
+        return createPortal(
+          <div className="glass-modal-overlay">
+            <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px', padding: 0, overflow: 'hidden', borderRadius: '24px' }}>
+              {/* Modal Brand Artwork Banner */}
+              <div
+                style={{
+                  minHeight: '125px',
+                  position: 'relative',
+                  padding: '1.25rem 1.25rem 1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  overflow: 'hidden',
+                  color: '#fff',
+                }}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: `url(${JSON.stringify(normalizeCardBackground(activeMeta.bannerImage) ?? DEFAULT_CARD_BACKGROUND)}) center/cover`,
+                    zIndex: 0,
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: 'linear-gradient(180deg, rgba(10,14,23,0.45) 0%, rgba(10,14,23,0.88) 100%)',
+                    zIndex: 1,
+                  }}
+                />
 
-            <div style={{ background: 'rgba(255,255,255,0.85)', borderRadius: '24px', padding: '1.2rem', display: 'grid', placeItems: 'center' }}>
-              <QRCode value={activeVoucher.code} size={190} fgColor="#191c1d" />
-            </div>
+                <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                    {activeMeta.logoUrl ? (
+                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#fff', padding: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+                        <img src={activeMeta.logoUrl} alt={`${activeMeta.companyName} logo`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          width: '40px',
+                          height: '40px',
+                          borderRadius: '12px',
+                          background: 'linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(220,230,250,0.9) 100%)',
+                          color: '#0f172a',
+                          display: 'grid',
+                          placeItems: 'center',
+                          fontWeight: 900,
+                          fontSize: '0.9rem',
+                          letterSpacing: '0.04em',
+                          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                          border: '1px solid rgba(255,255,255,0.6)',
+                        }}
+                      >
+                        {getMonogram(activeMeta.companyName)}
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', letterSpacing: '0.01em' }}>
+                          {activeMeta.companyName}
+                        </span>
+                        <ShieldCheck size={15} style={{ color: '#80f9c8', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))' }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.1rem' }}>
+                        {activeMeta.prefix && (
+                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'rgba(255,255,255,0.85)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            Node: {activeMeta.prefix}
+                          </span>
+                        )}
+                        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.7)' }}>• ID: {activeVoucher.id.substring(0, 8).toUpperCase()}</span>
+                      </div>
+                    </div>
+                  </div>
 
-            <div className="glass-card-strong" style={{ borderRadius: '20px', padding: '1rem', marginTop: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginBottom: '0.45rem' }}>
-                <div className="mono" style={{ fontWeight: 800, letterSpacing: '0.04em' }}>
-                  {visibleCodes[activeVoucher.id] ? activeVoucher.code : '••••••••••••'}
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setActiveVoucher(null)}
+                    style={{
+                      background: 'rgba(15,23,42,0.65)',
+                      color: '#fff',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      backdropFilter: 'blur(8px)',
+                      borderRadius: '8px',
+                      padding: '0.3rem 0.7rem',
+                    }}
+                  >
+                    Close
+                  </button>
                 </div>
+
+                <div style={{ position: 'relative', zIndex: 2, marginTop: '0.8rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.7)', letterSpacing: '0.01em' }}>
+                    {activeMeta.title}
+                  </h3>
+                  {activeMeta.address && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'rgba(255,255,255,0.82)', fontSize: '0.75rem', marginTop: '0.2rem' }}>
+                      <MapPin size={12} />
+                      <span>{activeMeta.address}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Body */}
+              <div style={{ padding: '1.25rem' }}>
+                {/* QR Code Container */}
+                <div style={{ background: '#ffffff', borderRadius: '20px', padding: '1.2rem', display: 'grid', placeItems: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+                  <QRCode value={activeVoucher.code} size={190} fgColor="#0f172a" />
+                  <span style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.6rem', fontWeight: 600 }}>
+                    Scan with merchant terminal to redeem
+                  </span>
+                </div>
+
+                {/* Voucher Code Box */}
+                <div className="glass-card-strong" style={{ borderRadius: '16px', padding: '0.9rem', marginTop: '1rem', border: '1.5px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.65rem', marginBottom: '0.65rem' }}>
+                    <div className="mono" style={{ fontWeight: 800, letterSpacing: '0.06em', fontSize: '1.1rem', color: 'var(--text-1)' }}>
+                      {isCodeVisible ? activeVoucher.code : '••••••••••••'}
+                    </div>
+                    <button
+                      onClick={() => setVisibleCodes((prev) => ({ ...prev, [activeVoucher.id]: !prev[activeVoucher.id] }))}
+                      aria-label={isCodeVisible ? "Hide voucher code" : "Reveal voucher code"}
+                      title={isCodeVisible ? "Hide code" : "Reveal code"}
+                      style={{
+                        background: 'var(--surface-soft)',
+                        border: '1px solid var(--border)',
+                        cursor: 'pointer',
+                        color: 'var(--text-2)',
+                        padding: '6px',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      type="button"
+                    >
+                      {isCodeVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                    <button
+                      onClick={() => void copyVoucherCode(activeVoucher.code)}
+                      aria-label="Copy voucher code"
+                      title="Copy code"
+                      style={{
+                        background: 'var(--surface-soft)',
+                        border: '1px solid var(--border)',
+                        cursor: 'pointer',
+                        color: 'var(--text-2)',
+                        padding: '6px',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      type="button"
+                    >
+                      <Copy size={15} />
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', color: 'var(--text-3)', fontSize: '0.84rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.6rem' }}>
+                    <span>
+                      Available: <strong style={{ color: 'var(--cyan)' }}>{formatCurrency(activeVoucher.remaining_balance ?? 0, userCurrency)}</strong>
+                      {activeMeta.faceValue != null && ` (of ${formatCurrency(activeMeta.faceValue, userCurrency)})`}
+                    </span>
+                    <span>Expires: {new Date(activeVoucher.expiry_date).toLocaleDateString()}</span>
+                  </div>
+                </div>
+
+                {activeMeta.description && (
+                  <p style={{ margin: '0.75rem 0 0', fontSize: '0.8rem', color: 'var(--text-3)', lineHeight: 1.5, textAlign: 'center' }}>
+                    {activeMeta.description}
+                  </p>
+                )}
+
                 <button
-                  onClick={(e) => { e.stopPropagation(); setVisibleCodes(prev => ({ ...prev, [activeVoucher.id]: !prev[activeVoucher.id] })); }}
-                  style={{ background: 'rgba(255,255,255,0.4)', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '4px', borderRadius: '8px', display: 'flex' }}
+                  className="btn btn-primary"
+                  style={{ width: '100%', marginTop: '1rem', padding: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700 }}
+                  onClick={() => void copyVoucherCode(activeVoucher.code)}
                 >
-                  {visibleCodes[activeVoucher.id] ? <EyeOff size={16} /> : <Eye size={16} />}
+                  <Copy size={16} /> Copy voucher code
                 </button>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', color: 'var(--text-3)' }}>
-                <span><strong>{formatCurrency(activeVoucher.remaining_balance ?? 0, userCurrency)}</strong> remaining</span>
-                <span>Expires {new Date(activeVoucher.expiry_date).toLocaleDateString()}</span>
-              </div>
             </div>
-
-            <button
-              className="btn btn-primary"
-              style={{ width: '100%', marginTop: '1rem' }}
-              onClick={async () => {
-                let successCopy = false;
-                try {
-                  if (navigator?.clipboard?.writeText) {
-                    await navigator.clipboard.writeText(activeVoucher.code);
-                    successCopy = true;
-                  } else {
-                    const textArea = document.createElement("textarea");
-                    textArea.value = activeVoucher.code;
-                    textArea.style.position = "fixed";
-                    textArea.style.left = "-999999px";
-                    textArea.style.top = "-999999px";
-                    document.body.appendChild(textArea);
-                    textArea.focus();
-                    textArea.select();
-                    successCopy = document.execCommand('copy');
-                    textArea.remove();
-                  }
-                } catch {
-                  // successCopy already false unless a write path above succeeded
-                }
-
-                if (successCopy) {
-                  success('Copied ticket code', 'Paste this in the merchant scan box.');
-                } else {
-                  success('Ticket code ready', 'Please select and copy the code manually.');
-                }
-              }}
-            >
-              Copy voucher code
-            </button>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        );
+      })()}
 
       {showWithdrawModal && createPortal(
         <div className="glass-modal-overlay">
