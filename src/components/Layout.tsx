@@ -67,7 +67,7 @@ export function Layout({ children }: LayoutProps = {}) {
                     ? 'Operations'
                     : currentPortal === 'merchant'
                       ? 'Workspace'
-                      : 'Gift Hub'}
+                      : 'Coupon Vault'}
                 </h1>
               </div>
             </div>

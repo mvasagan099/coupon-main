@@ -169,7 +169,7 @@ export function openRazorpayCheckout(options: {
       amount:      options.amountMinorUnit,
       currency:    options.currency,
       order_id:    options.orderId,
-      name:        options.name        ?? 'Gift Hub',
+      name:        options.name        ?? 'Coupon Vault',
       description: options.description ?? 'Wallet top-up',
       theme:       { color: options.theme ?? '#6c63ff' },
       prefill: {

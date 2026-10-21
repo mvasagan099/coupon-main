@@ -338,7 +338,7 @@ export default function UserDashboard() {
         orderId:        orderData.orderId,
         amountMinorUnit: orderData.amount,
         currency:       orderData.currency,
-        name:           'Gift Hub',
+        name:           'Coupon Vault',
         description:    'Wallet top-up',
         prefillEmail:   user.email ?? '',
         theme:          '#6c63ff',
