@@ -531,6 +531,98 @@ export async function updateGiftCardBanner(id: string, companyId: string, previo
   if (error || !data) throw new Error('Background was not saved. The coupon may have changed or your merchant access may have expired. Reload before retrying.');
 }
 
+export interface UpdateGiftCardInput {
+  title?: string;
+  description?: string;
+  terms?: string;
+  price?: number;
+  value?: number;
+  expiry_date?: string;
+  country_code?: string;
+  banner_image?: string;
+  issue_limit?: number | null;
+  is_active?: boolean;
+}
+
+export async function updateGiftCard(
+  id: string,
+  companyId: string,
+  updates: UpdateGiftCardInput
+): Promise<GiftCard> {
+  const payload: Record<string, any> = {};
+  if (updates.title !== undefined) payload.title = updates.title.trim();
+  if (updates.description !== undefined) payload.description = updates.description.trim();
+  if (updates.terms !== undefined) payload.terms = updates.terms.trim();
+  if (updates.price !== undefined) {
+    if (!Number.isFinite(updates.price) || updates.price < 0) throw new Error('Price cannot be negative.');
+    payload.price = Math.round(updates.price * 100) / 100;
+  }
+  if (updates.value !== undefined) {
+    if (!Number.isFinite(updates.value) || updates.value <= 0) throw new Error('Face value must be positive.');
+    payload.value = Math.round(updates.value * 100) / 100;
+  }
+  if (updates.expiry_date !== undefined) payload.expiry_date = updates.expiry_date;
+  if (updates.country_code !== undefined) payload.country_code = updates.country_code;
+  if (updates.banner_image !== undefined) {
+    const banner = normalizeCardBackground(updates.banner_image);
+    if (!banner) throw new Error('Choose a preset or valid HTTPS image URL.');
+    payload.banner_image = banner;
+  }
+  if (updates.issue_limit !== undefined) {
+    if (updates.issue_limit !== null && (!Number.isFinite(updates.issue_limit) || updates.issue_limit <= 0)) {
+      throw new Error('Issue limit must be positive.');
+    }
+    payload.issue_limit = updates.issue_limit;
+  }
+  if (updates.is_active !== undefined) payload.is_active = updates.is_active;
+
+  if (isSupabaseConfigured && !hasTimedOut) {
+    const { data, error } = await supabase
+      .from('gift_cards')
+      .update(payload)
+      .eq('id', id)
+      .eq('company_id', companyId)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      throw error ?? new Error('Failed to update campaign.');
+    }
+    return data as GiftCard;
+  }
+
+  const cards = getLocal<GiftCard[]>('cv_gift_cards', []);
+  const idx = cards.findIndex(c => c.id === id && c.company_id === companyId);
+  if (idx === -1) throw new Error('Campaign not found.');
+  cards[idx] = { ...cards[idx], ...payload };
+  setLocal('cv_gift_cards', cards);
+  return cards[idx];
+}
+
+export async function toggleGiftCardActive(
+  id: string,
+  companyId: string,
+  isActive: boolean
+): Promise<void> {
+  if (isSupabaseConfigured && !hasTimedOut) {
+    const { error } = await supabase
+      .from('gift_cards')
+      .update({ is_active: isActive })
+      .eq('id', id)
+      .eq('company_id', companyId);
+
+    if (error) throw error;
+    return;
+  }
+
+  const cards = getLocal<GiftCard[]>('cv_gift_cards', []);
+  const idx = cards.findIndex(c => c.id === id && c.company_id === companyId);
+  if (idx !== -1) {
+    cards[idx].is_active = isActive;
+    setLocal('cv_gift_cards', cards);
+  }
+}
+
 export async function deleteGiftCard(id: string): Promise<void> {
   const { data, error } = await supabase.from("gift_cards").delete().eq("id", id).select("id");
   

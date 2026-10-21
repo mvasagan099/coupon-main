@@ -6,7 +6,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import CountrySelector from '../components/CountrySelector';
 import { getCountryByCode } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
-import { Rocket, Store, AlertCircle } from 'lucide-react';
+import { Rocket, Store, AlertCircle, Edit3, Pause, Play, Copy, Trash2, Search, CheckCircle2, Clock, X, Layers, Filter } from 'lucide-react';
+import { useNow } from '../hooks/useNow';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
@@ -14,6 +15,8 @@ import { LoadingPage } from '../components/LoadingPage';
 import type { Company, GiftCard, RedemptionTransaction } from '../lib/supabase';
 import {
   createGiftCard,
+  updateGiftCard,
+  toggleGiftCardActive,
   updateGiftCardCountry,
   deleteGiftCard,
   getCompanyByOwner,
@@ -59,6 +62,7 @@ function createInitialWizardForm() {
 }
 
 export default function MerchantDashboard() {
+  const now = useNow();
   const { user } = useAuth();
   const { success, error: toastError } = useToast();
   const navigate = useNavigate();
@@ -95,6 +99,28 @@ export default function MerchantDashboard() {
 
   const [wizardStep, setWizardStep] = useState(1);
   const [wizardForm, setWizardForm] = useState(createInitialWizardForm);
+
+  // Campaign management & filtering state
+  const [offerSearch, setOfferSearch] = useState('');
+  const [offerStatusFilter, setOfferStatusFilter] = useState<'all' | 'active' | 'paused' | 'sold_out' | 'expired'>('all');
+  const [offerSortBy, setOfferSortBy] = useState<'newest' | 'sales' | 'price_desc' | 'price_asc' | 'expiry'>('newest');
+
+  // Edit campaign modal state
+  const [editingOffer, setEditingOffer] = useState<GiftCard | null>(null);
+  const [editForm, setEditForm] = useState({
+    title: '',
+    description: '',
+    terms: '',
+    price: '',
+    value: '',
+    issueLimit: '',
+    expiryDate: '',
+    countryCode: '',
+    bannerImage: DEFAULT_CARD_BACKGROUND,
+    isActive: true,
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [togglingOfferId, setTogglingOfferId] = useState<string | null>(null);
 
   const [settlements, setSettlements] = useState<any[]>([]);
 
@@ -251,6 +277,113 @@ export default function MerchantDashboard() {
     }
   };
 
+  const handleStartEdit = (offer: GiftCard) => {
+    setEditingOffer(offer);
+    setEditForm({
+      title: offer.title,
+      description: offer.description || '',
+      terms: offer.terms || '',
+      price: String(offer.price),
+      value: String(offer.value),
+      issueLimit: offer.issue_limit ? String(offer.issue_limit) : '',
+      expiryDate: offer.expiry_date ? offer.expiry_date.slice(0, 10) : '',
+      countryCode: offer.country_code || '',
+      bannerImage: offer.banner_image || DEFAULT_CARD_BACKGROUND,
+      isActive: offer.is_active !== false,
+    });
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingOffer || !company) return;
+    const priceNum = parseFloat(editForm.price);
+    const valueNum = parseFloat(editForm.value);
+    const limitNum = editForm.issueLimit ? parseInt(editForm.issueLimit, 10) : null;
+
+    if (isNaN(priceNum) || priceNum < 0) {
+      toastError('Invalid price', 'Selling price cannot be negative.');
+      return;
+    }
+    if (isNaN(valueNum) || valueNum <= 0) {
+      toastError('Invalid value', 'Card face value must be positive.');
+      return;
+    }
+    if (limitNum !== null && (isNaN(limitNum) || limitNum <= 0)) {
+      toastError('Invalid issue limit', 'Issue limit must be positive.');
+      return;
+    }
+    if (limitNum !== null && (editingOffer.issued_count || 0) > limitNum) {
+      toastError('Issue limit too low', `Already sold ${editingOffer.issued_count} vouchers. Limit cannot be lower than existing sales.`);
+      return;
+    }
+    if (limitNum !== null && company.coupon_limit && limitNum > company.coupon_limit) {
+      toastError('Exceeds limit', `Limit cannot exceed your company maximum of ${company.coupon_limit}.`);
+      return;
+    }
+
+    setSavingEdit(true);
+    try {
+      const updated = await updateGiftCard(editingOffer.id, company.id, {
+        title: editForm.title,
+        description: editForm.description,
+        terms: editForm.terms,
+        price: priceNum,
+        value: valueNum,
+        issue_limit: limitNum,
+        expiry_date: editForm.expiryDate ? new Date(editForm.expiryDate).toISOString() : undefined,
+        country_code: editForm.countryCode,
+        banner_image: editForm.bannerImage,
+        is_active: editForm.isActive,
+      });
+
+      setOffers(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
+      success('Campaign updated', `"${updated.title}" has been saved.`);
+      setEditingOffer(null);
+      await fetchMerchantProfile();
+    } catch (err: unknown) {
+      toastError('Update failed', getErrorMessage(err, 'Could not save campaign updates.'));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleToggleActive = async (offer: GiftCard) => {
+    if (!company) return;
+    const nextStatus = offer.is_active === false;
+    setTogglingOfferId(offer.id);
+    try {
+      await toggleGiftCardActive(offer.id, company.id, nextStatus);
+      setOffers(prev => prev.map(o => o.id === offer.id ? { ...o, is_active: nextStatus } : o));
+      success(
+        nextStatus ? 'Campaign resumed' : 'Campaign paused',
+        nextStatus
+          ? `"${offer.title}" is now active and visible in the marketplace.`
+          : `"${offer.title}" is paused and hidden from marketplace buyers.`
+      );
+    } catch (err: unknown) {
+      toastError('Status change failed', getErrorMessage(err, 'Could not update campaign status.'));
+    } finally {
+      setTogglingOfferId(null);
+    }
+  };
+
+  const handleCloneCampaign = (offer: GiftCard) => {
+    setWizardForm({
+      title: `${offer.title} (Copy)`,
+      description: offer.description || '',
+      terms: offer.terms || '',
+      price: String(offer.price),
+      value: String(offer.value),
+      issueLimit: offer.issue_limit ? String(offer.issue_limit) : '',
+      expiryDate: getDefaultExpiryDate(),
+      countryCode: offer.country_code || '',
+      bannerImage: offer.banner_image || DEFAULT_CARD_BACKGROUND,
+    });
+    setWizardStep(1);
+    success('Campaign cloned', 'Wizard prefilled with campaign details. Review and publish your new campaign.');
+    window.scrollTo({ top: 300, behavior: 'smooth' });
+  };
+
   const handleDeleteCampaign = async (id: string, title: string) => {
     if (!confirm(`Are you sure you want to delete the campaign "${title}"? This action cannot be undone.`)) return;
     try {
@@ -258,9 +391,60 @@ export default function MerchantDashboard() {
       success('Campaign deleted', `"${title}" has been removed from the marketplace.`);
       fetchMerchantProfile();
     } catch (err: unknown) {
-      toastError('Deletion error', getErrorMessage(err, 'Failed to delete campaign.'));
+      const msg = getErrorMessage(err, 'Failed to delete campaign.');
+      if (msg.includes('already purchased') || msg.includes('customer')) {
+        toastError('Cannot delete active campaign', 'Customers have already purchased vouchers from this campaign. Pause the campaign instead to remove it from the marketplace while preserving buyer vouchers.');
+      } else {
+        toastError('Deletion error', msg);
+      }
     }
   };
+
+  const filteredOffers = useMemo(() => {
+    return offers.filter(offer => {
+      const isExpired = !!offer.expiry_date && new Date(offer.expiry_date).getTime() <= now;
+      const isSoldOut = !!offer.issue_limit && (offer.issued_count || 0) >= offer.issue_limit;
+      const isPaused = offer.is_active === false;
+      const isActive = !isPaused && !isExpired && !isSoldOut;
+
+      if (offerStatusFilter === 'active' && !isActive) return false;
+      if (offerStatusFilter === 'paused' && !isPaused) return false;
+      if (offerStatusFilter === 'sold_out' && !isSoldOut) return false;
+      if (offerStatusFilter === 'expired' && !isExpired) return false;
+
+      if (offerSearch.trim()) {
+        const query = offerSearch.toLowerCase().trim();
+        const matchesTitle = offer.title.toLowerCase().includes(query);
+        const matchesDesc = (offer.description || '').toLowerCase().includes(query);
+        const country = getCountryByCode(offer.country_code || '');
+        const matchesCountry = country?.name.toLowerCase().includes(query) || (offer.country_code || '').toLowerCase().includes(query);
+        if (!matchesTitle && !matchesDesc && !matchesCountry) return false;
+      }
+
+      return true;
+    }).sort((a, b) => {
+      if (offerSortBy === 'newest') return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      if (offerSortBy === 'sales') return (b.issued_count || 0) - (a.issued_count || 0);
+      if (offerSortBy === 'price_desc') return b.price - a.price;
+      if (offerSortBy === 'price_asc') return a.price - b.price;
+      if (offerSortBy === 'expiry') return new Date(a.expiry_date || 0).getTime() - new Date(b.expiry_date || 0).getTime();
+      return 0;
+    });
+  }, [offers, offerStatusFilter, offerSearch, offerSortBy, now]);
+
+  const statusCounts = useMemo(() => {
+    let active = 0, paused = 0, soldOut = 0, expired = 0;
+    for (const o of offers) {
+      const isExp = !!o.expiry_date && new Date(o.expiry_date).getTime() <= now;
+      const isSold = !!o.issue_limit && (o.issued_count || 0) >= o.issue_limit;
+      const isPsd = o.is_active === false;
+      if (isPsd) paused++;
+      else if (isExp) expired++;
+      else if (isSold) soldOut++;
+      else active++;
+    }
+    return { all: offers.length, active, paused, soldOut, expired };
+  }, [offers, now]);
 
   const handleResendApprovalRequest = async () => {
     if (!company || !user?.id) return;
@@ -682,36 +866,328 @@ export default function MerchantDashboard() {
               </div>
             </div>
 
-            <div className="glass-card-strong" style={{ padding: '1.5rem' }}>
-              <span className="section-label">Published campaigns</span>
-              <h3 style={{ margin: '0.35rem 0 1rem', fontSize: '1.35rem' }}>Live offers</h3>
+            <div className="glass-card-strong" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div>
+                  <span className="section-label">Campaign Portfolio</span>
+                  <h3 style={{ margin: '0.25rem 0 0', fontSize: '1.35rem', fontWeight: 800 }}>Manage Published Coupons</h3>
+                  <p style={{ margin: '0.25rem 0 0', color: 'var(--text-3)', fontSize: '0.85rem' }}>
+                    Monitor sales, adjust stock, edit campaign terms, or pause offers instantly.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setWizardForm(createInitialWizardForm());
+                      setWizardStep(1);
+                      window.scrollTo({ top: 300, behavior: 'smooth' });
+                    }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  >
+                    <Rocket size={14} /> New Campaign
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Metric Pills */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.65rem' }}>
+                <div className="glass-card" style={{ padding: '0.75rem', borderRadius: '14px', textAlign: 'center' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase', fontWeight: 700 }}>Total</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--text-1)', marginTop: '2px' }}>{statusCounts.all}</div>
+                </div>
+                <div className="glass-card" style={{ padding: '0.75rem', borderRadius: '14px', textAlign: 'center', borderColor: 'rgba(34,197,94,0.3)' }}>
+                  <span style={{ fontSize: '0.7rem', color: '#4ade80', textTransform: 'uppercase', fontWeight: 700 }}>Active</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#4ade80', marginTop: '2px' }}>{statusCounts.active}</div>
+                </div>
+                <div className="glass-card" style={{ padding: '0.75rem', borderRadius: '14px', textAlign: 'center', borderColor: 'rgba(245,158,11,0.3)' }}>
+                  <span style={{ fontSize: '0.7rem', color: '#fbbf24', textTransform: 'uppercase', fontWeight: 700 }}>Paused</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#fbbf24', marginTop: '2px' }}>{statusCounts.paused}</div>
+                </div>
+                <div className="glass-card" style={{ padding: '0.75rem', borderRadius: '14px', textAlign: 'center', borderColor: 'rgba(239,68,68,0.3)' }}>
+                  <span style={{ fontSize: '0.7rem', color: '#f87171', textTransform: 'uppercase', fontWeight: 700 }}>Sold Out</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#f87171', marginTop: '2px' }}>{statusCounts.soldOut}</div>
+                </div>
+                <div className="glass-card" style={{ padding: '0.75rem', borderRadius: '14px', textAlign: 'center' }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-4)', textTransform: 'uppercase', fontWeight: 700 }}>Expired</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 900, color: 'var(--text-4)', marginTop: '2px' }}>{statusCounts.expired}</div>
+                </div>
+              </div>
+
+              {/* Search, Filter Tabs and Sort Controls */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+                  <div style={{ position: 'relative', flex: '1 1 200px' }}>
+                    <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-4)' }} />
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="Filter by title, terms or country..."
+                      value={offerSearch}
+                      onChange={e => setOfferSearch(e.target.value)}
+                      style={{ paddingLeft: '2.2rem', width: '100%', fontSize: '0.85rem' }}
+                    />
+                    {offerSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setOfferSearch('')}
+                        style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-4)', cursor: 'pointer', padding: 0 }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  <select
+                    className="input"
+                    value={offerSortBy}
+                    onChange={e => setOfferSortBy(e.target.value as any)}
+                    style={{ flex: '0 0 auto', width: 'auto', fontSize: '0.82rem', padding: '0.45rem 0.85rem' }}
+                  >
+                    <option value="newest">Sort: Newest first</option>
+                    <option value="sales">Sort: Most sold</option>
+                    <option value="price_desc">Sort: Highest price</option>
+                    <option value="price_asc">Sort: Lowest price</option>
+                    <option value="expiry">Sort: Expiring soon</option>
+                  </select>
+                </div>
+
+                {/* Filter pills */}
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  {(['all', 'active', 'paused', 'sold_out', 'expired'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      type="button"
+                      className={`btn btn-sm ${offerStatusFilter === tab ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setOfferStatusFilter(tab)}
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        fontSize: '0.75rem',
+                        textTransform: 'capitalize',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      <span>{tab.replace('_', ' ')}</span>
+                      <span
+                        style={{
+                          background: offerStatusFilter === tab ? 'rgba(255,255,255,0.2)' : 'var(--surface-soft)',
+                          borderRadius: '999px',
+                          padding: '0.05rem 0.35rem',
+                          fontSize: '0.7rem',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {tab === 'all' ? statusCounts.all : tab === 'active' ? statusCounts.active : tab === 'paused' ? statusCounts.paused : tab === 'sold_out' ? statusCounts.soldOut : statusCounts.expired}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Offers List */}
               {offers.length === 0 ? (
-                <div style={{ color: 'var(--text-3)' }}>No live campaigns yet.</div>
+                <div className="glass-card" style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-3)', borderRadius: '16px' }}>
+                  <Layers size={36} style={{ color: 'var(--text-4)', margin: '0 auto 0.75rem', display: 'block' }} />
+                  <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text-2)' }}>No published campaigns yet</div>
+                  <p style={{ margin: '0.35rem 0 1rem', fontSize: '0.85rem' }}>
+                    Use the launch wizard to publish your first gift card offer to the marketplace.
+                  </p>
+                </div>
+              ) : filteredOffers.length === 0 ? (
+                <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-3)', borderRadius: '16px' }}>
+                  <Filter size={28} style={{ color: 'var(--text-4)', margin: '0 auto 0.5rem', display: 'block' }} />
+                  <div style={{ fontWeight: 600 }}>No campaigns match your filter</div>
+                  <p style={{ margin: '0.25rem 0 0.75rem', fontSize: '0.82rem' }}>Try clearing your search query or selecting a different status filter.</p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => { setOfferSearch(''); setOfferStatusFilter('all'); }}
+                  >
+                    Reset filters
+                  </button>
+                </div>
               ) : (
                 <div style={{ display: 'grid', gap: '0.85rem' }}>
-                  {offers.map((offer) => (
-                    <div key={offer.id} className="glass-card" style={{ borderRadius: '20px', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <div style={{ fontWeight: 700 }}>{offer.title}</div>
-                        <div style={{ color: 'var(--text-3)', marginTop: '0.25rem' }}>{offer.description}</div>
-                        <div style={{ fontSize: '0.82rem', fontFamily: 'monospace', opacity: 0.8, marginTop: '0.5rem' }}>
-                          <span style={{ color: 'var(--text-3)' }}>Price:</span> {offer.currency ? formatCurrency(offer.price, offer.currency) : "Set country"} <span style={{ margin: '0 0.5rem', color: 'var(--border)' }}>|</span> <span style={{ color: 'var(--text-3)' }}>Value:</span> {offer.currency ? formatCurrency(offer.value, offer.currency) : offer.value.toFixed(2)}
+                  {filteredOffers.map((offer) => {
+                    const isExpired = !!offer.expiry_date && new Date(offer.expiry_date).getTime() <= now;
+                    const isSoldOut = !!offer.issue_limit && (offer.issued_count || 0) >= offer.issue_limit;
+                    const isPaused = offer.is_active === false;
+
+                    const country = getCountryByCode(offer.country_code || '');
+                    const currency = offer.currency || country.currency || 'USD';
+                    const soldCount = offer.issued_count || 0;
+                    const limitCount = offer.issue_limit;
+                    const percentSold = limitCount ? Math.min(100, Math.round((soldCount / limitCount) * 100)) : null;
+                    const discountPercent = offer.value > offer.price ? Math.round(((offer.value - offer.price) / offer.value) * 100) : 0;
+
+                    return (
+                      <div
+                        key={offer.id}
+                        className="glass-card"
+                        style={{
+                          borderRadius: '18px',
+                          padding: '1.15rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.85rem',
+                          border: isPaused ? '1px dashed var(--border)' : '1px solid var(--border)',
+                          background: isPaused ? 'rgba(0,0,0,0.15)' : undefined,
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        {/* Top row: Thumbnail, Title, Country, Status Badge */}
+                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                          <div
+                            style={{
+                              width: '74px',
+                              height: '52px',
+                              borderRadius: '10px',
+                              backgroundImage: cardBackgroundImage(offer.banner_image || DEFAULT_CARD_BACKGROUND, true),
+                              backgroundSize: 'cover',
+                              backgroundPosition: 'center',
+                              flexShrink: 0,
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                            }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-1)', wordBreak: 'break-word' }}>
+                                {offer.title}
+                              </h4>
+                              {/* Status Badge */}
+                              <div>
+                                {isPaused ? (
+                                  <span className="badge badge-amber" style={{ fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                    <Pause size={11} /> Paused
+                                  </span>
+                                ) : isExpired ? (
+                                  <span className="badge" style={{ fontSize: '0.72rem', background: 'var(--surface-soft)', color: 'var(--text-4)' }}>
+                                    <Clock size={11} /> Expired
+                                  </span>
+                                ) : isSoldOut ? (
+                                  <span className="badge badge-red" style={{ fontSize: '0.72rem' }}>
+                                    Sold out
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-green" style={{ fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                    <CheckCircle2 size={11} /> Active
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginTop: '0.35rem', flexWrap: 'wrap', fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                {country.flag} {country.name}
+                              </span>
+                              <span>·</span>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Clock size={12} /> Exp: {offer.expiry_date ? new Date(offer.expiry_date).toLocaleDateString() : 'None'}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--text-3)' }}>
-                          {offer.issue_limit ? (
-                            <span style={{ color: offer.issued_count && offer.issued_count >= offer.issue_limit ? 'var(--red)' : 'inherit', fontWeight: 600 }}>
-                              {offer.issued_count || 0} / {offer.issue_limit} sold
+
+                        {/* Middle row: Price, Value, Stock Progress */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', background: 'var(--surface-soft)', padding: '0.65rem 0.85rem', borderRadius: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+                            <span className="mono" style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--cyan)' }}>
+                              {formatCurrency(offer.price, currency)}
                             </span>
-                          ) : (
-                            <span>{offer.issued_count || 0} sold (Unlimited)</span>
-                          )}
+                            <span className="mono" style={{ fontSize: '0.85rem', color: 'var(--text-3)', textDecoration: 'line-through' }}>
+                              {formatCurrency(offer.value, currency)}
+                            </span>
+                            {discountPercent > 0 && (
+                              <span style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', padding: '0.1rem 0.4rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 800 }}>
+                                {discountPercent}% OFF
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ flex: '1 1 180px', maxWidth: '240px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', fontWeight: 700, marginBottom: '3px', color: 'var(--text-3)' }}>
+                              <span>Stock claimed</span>
+                              <span style={{ color: isSoldOut ? 'var(--red)' : 'var(--text-2)' }}>
+                                {limitCount ? `${soldCount} / ${limitCount} (${percentSold}%)` : `${soldCount} sold`}
+                              </span>
+                            </div>
+                            {limitCount && (
+                              <div style={{ height: '5px', background: 'var(--border)', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div
+                                  style={{
+                                    height: '100%',
+                                    width: `${percentSold}%`,
+                                    background: isSoldOut ? 'var(--red)' : (percentSold ?? 0) > 80 ? '#fbbf24' : 'var(--cyan)',
+                                    borderRadius: '999px',
+                                    transition: 'width 0.3s ease',
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bottom Action Toolbar */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', paddingTop: '0.25rem', borderTop: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            {/* Toggle Pause / Resume */}
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${isPaused ? 'btn-success' : 'btn-secondary'}`}
+                              disabled={togglingOfferId === offer.id}
+                              onClick={() => handleToggleActive(offer)}
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                              title={isPaused ? 'Reactivate campaign in marketplace' : 'Pause campaign (temporarily hides from marketplace)'}
+                            >
+                              {togglingOfferId === offer.id ? (
+                                <span className="spinner spinner-sm" style={{ width: '12px', height: '12px' }} />
+                              ) : isPaused ? (
+                                <Play size={12} />
+                              ) : (
+                                <Pause size={12} />
+                              )}
+                              <span>{isPaused ? 'Resume' : 'Pause'}</span>
+                            </button>
+
+                            {/* Edit Campaign */}
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleStartEdit(offer)}
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                            >
+                              <Edit3 size={12} /> Edit
+                            </button>
+
+                            {/* Clone / Duplicate */}
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleCloneCampaign(offer)}
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                              title="Duplicate settings to launch a new campaign"
+                            >
+                              <Copy size={12} /> Clone
+                            </button>
+                          </div>
+
+                          {/* Delete Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCampaign(offer.id, offer.title)}
+                            className="btn btn-danger btn-sm"
+                            style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                          >
+                            <Trash2 size={12} /> Delete
+                          </button>
                         </div>
                       </div>
-                      <button onClick={() => handleDeleteCampaign(offer.id, offer.title)} className="btn btn-danger btn-sm" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}>
-                        Delete
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1060,6 +1536,268 @@ export default function MerchantDashboard() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Campaign Modal ── */}
+      {editingOffer && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-campaign-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(5, 7, 15, 0.78)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.5rem',
+            overflowY: 'auto',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !savingEdit) setEditingOffer(null);
+          }}
+        >
+          <div
+            className="glass-card-strong fade-in"
+            style={{
+              width: '100%',
+              maxWidth: '720px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              borderRadius: '24px',
+              padding: '2rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.25rem',
+              boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.7)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
+              <div>
+                <span className="section-label">Campaign settings</span>
+                <h2 id="edit-campaign-title" style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', fontWeight: 800 }}>
+                  Edit Campaign: {editingOffer.title}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditingOffer(null)}
+                disabled={savingEdit}
+                style={{ padding: '0.4rem', borderRadius: '50%' }}
+                aria-label="Close modal"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {/* Card Live Preview */}
+              <div>
+                <span className="label" style={{ marginBottom: '0.5rem', display: 'block' }}>Live Card Preview</span>
+                <div
+                  className="card"
+                  style={{
+                    backgroundImage: cardBackgroundImage(editForm.bannerImage, true),
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center',
+                    borderRadius: '20px',
+                    padding: '1.5rem',
+                    color: '#ffffff',
+                    minHeight: '160px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    border: '1px solid var(--cyan-border)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <span style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.15em', color: 'var(--cyan)' }}>
+                        {(company?.name || 'Your brand')}
+                      </span>
+                      <h4 style={{ fontSize: '1.15rem', fontWeight: 900, margin: '4px 0 0 0', color: '#fff' }}>
+                        {editForm.title || 'Campaign Title'}
+                      </h4>
+                    </div>
+                    {editForm.isActive ? (
+                      <span className="badge badge-green" style={{ fontSize: '0.68rem' }}>Active</span>
+                    ) : (
+                      <span className="badge badge-amber" style={{ fontSize: '0.68rem' }}>Paused</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1rem' }}>
+                    <div>
+                      <span style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-3)' }}>Selling price</span>
+                      <p className="mono" style={{ fontSize: '1.15rem', fontWeight: 900, margin: 0, color: 'var(--cyan)' }}>
+                        {formatCurrency(Number(editForm.price || 0), editForm.countryCode ? getCountryByCode(editForm.countryCode).currency : "USD")}
+                      </p>
+                    </div>
+                    <span style={{ background: 'rgba(34,197,94,0.2)', border: '1px solid rgba(34,197,94,0.3)', padding: '0.25rem 0.6rem', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 800, color: '#4ade80' }}>
+                      Value: {formatCurrency(Number(editForm.value || 0), editForm.countryCode ? getCountryByCode(editForm.countryCode).currency : "USD")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* General details */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+                <div>
+                  <label className="label">Campaign title</label>
+                  <input
+                    type="text"
+                    className="input"
+                    required
+                    value={editForm.title}
+                    onChange={e => setEditForm({ ...editForm, title: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="label">Coupon country</label>
+                  <CountrySelector
+                    id="edit-campaign-country"
+                    value={editForm.countryCode}
+                    onChange={c => setEditForm({ ...editForm, countryCode: c.code })}
+                  />
+                  <p className="background-help">Only users registered in this country can purchase and redeem this coupon.</p>
+                </div>
+              </div>
+
+              {/* Pricing & Stock */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+                <div>
+                  <label className="label">
+                    Selling price ({editForm.countryCode ? getCountryByCode(editForm.countryCode).currency : 'USD'})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="input mono"
+                    required
+                    value={editForm.price}
+                    onChange={e => setEditForm({ ...editForm, price: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="label">
+                    Face value ({editForm.countryCode ? getCountryByCode(editForm.countryCode).currency : 'USD'})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    className="input mono"
+                    required
+                    value={editForm.value}
+                    onChange={e => setEditForm({ ...editForm, value: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="label">Issue limit (inventory cap)</label>
+                  <input
+                    type="number"
+                    min={editingOffer.issued_count || 1}
+                    className="input mono"
+                    placeholder="Leave empty for unlimited"
+                    value={editForm.issueLimit}
+                    onChange={e => setEditForm({ ...editForm, issueLimit: e.target.value })}
+                  />
+                  <p className="background-help">
+                    Already sold: {editingOffer.issued_count || 0}.
+                  </p>
+                </div>
+              </div>
+
+              {/* Expiry Date */}
+              <div>
+                <label className="label">Expiry date</label>
+                <input
+                  type="date"
+                  className="input"
+                  required
+                  value={editForm.expiryDate}
+                  onChange={e => setEditForm({ ...editForm, expiryDate: e.target.value })}
+                />
+              </div>
+
+              {/* Description & Terms */}
+              <div>
+                <label className="label">Description</label>
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={editForm.description}
+                  onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="label">Terms & conditions</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  value={editForm.terms}
+                  onChange={e => setEditForm({ ...editForm, terms: e.target.value })}
+                />
+              </div>
+
+              {/* Card Artwork */}
+              <div>
+                <CardBackgroundPicker
+                  value={editForm.bannerImage}
+                  onChange={image => setEditForm({ ...editForm, bannerImage: image })}
+                  disabled={savingEdit}
+                />
+              </div>
+
+              {/* Active Toggle Switch */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1rem', background: 'var(--surface-soft)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-1)' }}>Active in Marketplace</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                    When disabled, the coupon is hidden from marketplace buyers but remains valid for existing buyers.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={editForm.isActive}
+                  onChange={e => setEditForm({ ...editForm, isActive: e.target.checked })}
+                  style={{ width: '1.25rem', height: '1.25rem', cursor: 'pointer', accentColor: 'var(--cyan)' }}
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={savingEdit}
+                  onClick={() => setEditingOffer(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingEdit}
+                  style={{ minWidth: '130px' }}
+                >
+                  {savingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
