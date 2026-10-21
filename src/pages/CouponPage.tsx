@@ -215,11 +215,11 @@ export default function CouponPage() {
                    {(() => {
                      const destMeta = getDestinationMetaSafe(order.coupon?.redemption_destination);
                      return destMeta ? (
-                       <span className={`badge ${destMeta.badgeClass}`} style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>
+                       <span className={`badge voucher-artwork-badge ${destMeta.badgeClass}`} style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>
                          {destMeta.icon} {destMeta.shortLabel}
                        </span>
                      ) : (
-                       <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>
+                       <span className="badge voucher-artwork-badge badge-amber" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>
                          ⚠️ Unclassified
                        </span>
                      );

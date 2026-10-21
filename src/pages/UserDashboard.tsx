@@ -857,11 +857,11 @@ export default function UserDashboard() {
                         <div className="marketplace-card-sheen" />
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', position: 'relative', zIndex: 3 }}>
                           {card.redemption_destination ? (
-                            <span className={`badge ${getDestinationMeta(card.redemption_destination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.7rem' }}>
+                            <span className={`badge marketplace-card-dest-badge ${getDestinationMeta(card.redemption_destination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.7rem' }}>
                               {getDestinationMeta(card.redemption_destination)?.icon} {getDestinationMeta(card.redemption_destination)?.shortLabel}
                             </span>
                           ) : (
-                            <span className="badge badge-amber" style={{ fontSize: '0.7rem' }}>⚠️ Unclassified</span>
+                            <span className="badge marketplace-card-dest-badge badge-amber" style={{ fontSize: '0.7rem' }}>⚠️ Unclassified</span>
                           )}
                           <span className="badge marketplace-card-badge">
                             Save {savingsPct}%
@@ -1567,11 +1567,11 @@ export default function UserDashboard() {
                                         </span>
                                       )}
                                       {meta.redemptionDestination ? (
-                                        <span className={`badge ${getDestinationMeta(meta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
+                                        <span className={`badge voucher-artwork-badge ${getDestinationMeta(meta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
                                           {getDestinationMeta(meta.redemptionDestination)?.icon} {getDestinationMeta(meta.redemptionDestination)?.shortLabel}
                                         </span>
                                       ) : (
-                                        <span className="badge badge-amber" style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
+                                        <span className="badge voucher-artwork-badge badge-amber" style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
                                           ⚠️ Unclassified
                                         </span>
                                       )}
@@ -2077,11 +2077,11 @@ export default function UserDashboard() {
                         )}
                         <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.7)' }}>• ID: {activeVoucher.id.substring(0, 8).toUpperCase()}</span>
                         {activeMeta.redemptionDestination ? (
-                          <span className={`badge ${getDestinationMeta(activeMeta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
+                          <span className={`badge voucher-artwork-badge ${getDestinationMeta(activeMeta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
                             {getDestinationMeta(activeMeta.redemptionDestination)?.icon} {getDestinationMeta(activeMeta.redemptionDestination)?.shortLabel}
                           </span>
                         ) : (
-                          <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
+                          <span className="badge voucher-artwork-badge badge-amber" style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
                             ⚠️ Unclassified
                           </span>
                         )}
