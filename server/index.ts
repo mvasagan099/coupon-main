@@ -492,17 +492,31 @@ app.post('/api/v1/payments/stripe/recover', writeLimiter, authenticateUserJWT, a
   }
 });
 
-// Direct checkout is enabled only when signed webhook fulfillment is configured.
+// Direct checkout is enabled for configured providers matching account currency.
 app.post('/api/v1/payments/coupon/options', authenticateUserJWT, async (_req, res) => {
  const { data, error } = await supabase.from('profiles').select('currency').eq('id', res.locals.userId).single();
  if (error || !data?.currency) return res.status(400).json({message:'Account country is required.'});
- return res.json({gateways:couponGateways(data.currency)});
+ const currency = data.currency;
+ return res.json({
+   gateways: couponGateways(currency),
+   config: {
+     razorpay: {
+       keyId: process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '',
+     },
+     stripe: {
+       publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || process.env.VITE_STRIPE_PUBLISHABLE_KEY || '',
+     },
+     paypal: {
+       clientId: process.env.PAYPAL_CLIENT_ID || process.env.VITE_PAYPAL_CLIENT_ID || '',
+     },
+   },
+ });
 });
 
 app.post('/api/v1/payments/coupon/abandon', writeLimiter, authenticateUserJWT, async (req,res) => {
  try {
   const {gateway,orderId}=req.body;
-  if (!['stripe','razorpay'].includes(gateway) || !isNonEmptyString(orderId)) return res.status(400).json({message:'Invalid checkout reference.'});
+  if (!['stripe','razorpay','paypal'].includes(gateway) || !isNonEmptyString(orderId)) return res.status(400).json({message:'Invalid checkout reference.'});
   const stored=await findPayment(supabase,gateway,orderId,res.locals.userId);
   const {data,error}=await supabase.rpc('abandon_coupon_checkout',{p_transaction_id:stored.id,p_user_id:res.locals.userId});
   if (error || !data) throw new Error('Could not cancel checkout. Verify the saved payment before trying again.');
@@ -513,7 +527,7 @@ app.post('/api/v1/payments/coupon/abandon', writeLimiter, authenticateUserJWT, a
 app.post('/api/v1/payments/coupon/recover', writeLimiter, authenticateUserJWT, async (req, res) => {
  try {
   const { gateway, orderId } = req.body;
-  if (!['stripe','razorpay'].includes(gateway) || !isNonEmptyString(orderId)) return res.status(400).json({message:'Invalid checkout reference.'});
+  if (!['stripe','razorpay','paypal'].includes(gateway) || !isNonEmptyString(orderId)) return res.status(400).json({message:'Invalid checkout reference.'});
   const stored = await findPayment(supabase,gateway,orderId,res.locals.userId);
   if (!stored.gift_card_id) return res.status(400).json({message:'This payment is not a coupon checkout.'});
   if (stored.status === 'paid' && stored.checkout_result) return res.json({state:'paid',...stored.checkout_result});
@@ -521,9 +535,21 @@ app.post('/api/v1/payments/coupon/recover', writeLimiter, authenticateUserJWT, a
    if (!stripeService) stripeService=new StripeService();
    return res.json(await recoverStripePayment(supabase,stripeService,res.locals.userId,orderId));
   }
+  if (gateway === 'paypal') {
+   if (!paypalService) paypalService = new PayPalService();
+   try {
+     const payment = await paypalService.verifyPayment({ gateway: 'paypal', gatewayOrderId: orderId, gatewayPaymentId: orderId });
+     if (payment.verified) {
+       return res.json({ state: 'paid', ...await settlePayment(supabase, 'paypal', orderId, res.locals.userId, payment) });
+     }
+   } catch {
+     // unconfirmed / pending
+   }
+   return res.json({ state: 'resume', orderId, amount: Number(stored.amount_major) * 100, currency: stored.currency });
+  }
   if (!razorpayService) razorpayService=new RazorpayService();
   const payment = await razorpayService.findCapturedOrderPayment(orderId);
-  if (!payment) return res.json({state:'resume',orderId,amount:Number(stored.amount_major)*100,currency:stored.currency,keyId:process.env.RAZORPAY_KEY_ID});
+  if (!payment) return res.json({state:'resume',orderId,amount:Number(stored.amount_major)*100,currency:stored.currency,keyId:process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID});
   return res.json({state:'paid',...await settlePayment(supabase,'razorpay',orderId,res.locals.userId,payment)});
  } catch (error) { return res.status(400).json({message:error instanceof Error?error.message:'Payment verification is pending. Retry the same order.'}); }
 });
@@ -582,7 +608,7 @@ app.post('/api/v1/payments/create', writeLimiter, authenticateUserJWT, async (re
       currency: result.currency,
       receiptId,
       walletAmount: amount,
-      ...(couponQuote ? {giftCardId:couponQuote.giftCardId,keyId:gateway === 'razorpay' ? process.env.RAZORPAY_KEY_ID : undefined} : {}),
+      ...(couponQuote ? {giftCardId:couponQuote.giftCardId,keyId:gateway === 'razorpay' ? (process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID) : undefined} : {}),
     });
   } catch (err: any) {
     console.error('[/payments/create]', err);

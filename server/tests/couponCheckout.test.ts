@@ -15,9 +15,9 @@ test('tampered prices, expired, disabled, wrong-country and invalid offers canno
  for(const [change,price] of [[{},1],[{expiry_date:'2020-01-01'},450],[{is_active:false},450],[{country_code:'US'},450],[{price:NaN},450],[{price:100001},100001]] as const) await assert.rejects(quoteCoupon(fixture(change),'owner',id,price));
  await assert.rejects(quoteCoupon(fixture(),'owner','invalid',450));
 });
-test('direct gateways require signing secrets; Razorpay only accepts INR checkout',()=>{
- const env={RAZORPAY_KEY_ID:'public',RAZORPAY_KEY_SECRET:'fixture',STRIPE_SECRET_KEY:'fixture'};
+test('direct gateways require configured credentials; Razorpay only accepts INR checkout',()=>{
+ const env={RAZORPAY_KEY_ID:'public'};
  assert.deepEqual(couponGateways('INR',env),[]);
- assert.deepEqual(couponGateways('INR',{...env,RAZORPAY_WEBHOOK_SECRET:'fixture'}),['razorpay']);
- assert.deepEqual(couponGateways('USD',{...env,RAZORPAY_WEBHOOK_SECRET:'fixture',STRIPE_WEBHOOK_SECRET:'fixture'}),['stripe']);
+ assert.deepEqual(couponGateways('INR',{...env,RAZORPAY_KEY_SECRET:'fixture'}),['razorpay']);
+ assert.deepEqual(couponGateways('USD',{...env,RAZORPAY_KEY_SECRET:'fixture',STRIPE_SECRET_KEY:'fixture'}),['stripe']);
 });

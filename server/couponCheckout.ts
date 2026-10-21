@@ -3,8 +3,26 @@ import type { PaymentGateway } from './services/PaymentService';
 
 export function couponGateways(currency: string, env = process.env): PaymentGateway[] {
   const gateways: PaymentGateway[] = [];
-  if (currency === 'INR' && env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET && env.RAZORPAY_WEBHOOK_SECRET) gateways.push('razorpay');
-  if (env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET) gateways.push('stripe');
+  const isSet = (val?: string) => typeof val === 'string' && val.trim().length > 0;
+
+  // Razorpay is the primary gateway for India (INR)
+  const hasRazorpay = isSet(env.RAZORPAY_KEY_ID) && (isSet(env.RAZORPAY_KEY_SECRET) || isSet(env.RAZORPAY_WEBHOOK_SECRET));
+  if (currency === 'INR' && hasRazorpay) {
+    gateways.push('razorpay');
+  }
+
+  // Stripe supports cards & global payments
+  const hasStripe = isSet(env.STRIPE_SECRET_KEY) || isSet(env.STRIPE_WEBHOOK_SECRET);
+  if (hasStripe) {
+    gateways.push('stripe');
+  }
+
+  // PayPal supports global payments for non-INR currencies
+  const hasPaypal = isSet(env.PAYPAL_CLIENT_ID) && (isSet(env.PAYPAL_CLIENT_SECRET) || isSet(env.PAYPAL_SECRET));
+  if (hasPaypal && currency !== 'INR') {
+    gateways.push('paypal');
+  }
+
   return gateways;
 }
 

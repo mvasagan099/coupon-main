@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { StripeElements, StripePaymentElement } from '@stripe/stripe-js';
-import { ArrowLeft, ShieldCheck, Wallet, CreditCard } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Wallet, CreditCard, Zap, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { LoadingPage } from '../components/LoadingPage';
@@ -13,7 +13,7 @@ import { cardBackgroundImage } from '../lib/cardBackgrounds';
 import { formatOfferDate, offerUnavailable } from '../lib/couponOffer';
 import { useNow } from '../hooks/useNow';
 import { abandonCouponPayment, createCouponPayment, getCouponPaymentOptions, getStripe, loadRazorpayScript, openRazorpayCheckout, recoverCouponPayment, verifyPayment } from '../lib/paymentGateway';
-import type { CouponPaymentRecovery, GatewayCreateResponse, GatewayVerifyResponse, PaymentGateway } from '../lib/paymentGateway';
+import type { CouponPaymentRecovery, GatewayCreateResponse, GatewayPublicConfig, GatewayVerifyResponse, PaymentGateway } from '../lib/paymentGateway';
 import './CouponOfferPage.css';
 
 type SavedCheckout = { gateway: PaymentGateway; orderId: string };
@@ -35,7 +35,8 @@ function CouponOffer({ id }: { id: string }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [gateways, setGateways] = useState<PaymentGateway[]>([]);
-  const [gateway, setGateway] = useState<PaymentGateway>('stripe');
+  const [gatewayConfig, setGatewayConfig] = useState<Record<string, GatewayPublicConfig>>({});
+  const [gateway, setGateway] = useState<PaymentGateway>('razorpay');
   const [optionsError, setOptionsError] = useState('');
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -52,7 +53,7 @@ function CouponOffer({ id }: { id: string }) {
   const [pending, setPending] = useState<SavedCheckout | null>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(recoveryKey) || 'null');
-      return saved && ['stripe','razorpay'].includes(saved.gateway) && typeof saved.orderId === 'string' ? saved : null;
+      return saved && ['stripe','razorpay','paypal'].includes(saved.gateway) && typeof saved.orderId === 'string' ? saved : null;
     } catch { return null; }
   });
   const savePending = (saved: SavedCheckout | null) => {
@@ -67,10 +68,23 @@ function CouponOffer({ id }: { id: string }) {
       if (!active) return;
       setDetails(offer); setBalance(Number(profile.wallet_balance)); setLoading(false);
     }).catch(error => { if (active) { setLoadError(errorMessage(error)); setLoading(false); } });
+
     getCouponPaymentOptions().then(options => {
       if (!active) return;
-      const enabled = options.gateways.filter(g => g === 'razorpay' || (g === 'stripe' && !!import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY));
-      setGateways(enabled); if (enabled[0]) setGateway(enabled[0]);
+      const cfg = options.config || {};
+      setGatewayConfig(cfg);
+      const stripeAvailable = !!(cfg.stripe?.publishableKey || import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+      const enabled = (options.gateways || []).filter(g => {
+        if (g === 'razorpay') return true;
+        if (g === 'stripe') return stripeAvailable;
+        if (g === 'paypal') return true;
+        return false;
+      });
+      setGateways(enabled);
+      if (enabled.length > 0) {
+        const pref = (enabled.includes('razorpay')) ? 'razorpay' : enabled[0];
+        setGateway(pref);
+      }
     }).catch(() => { if (active) setOptionsError('Direct payment is temporarily unavailable. You can still pay from your wallet.'); });
     return () => { active = false; };
   }, [id, user]);
@@ -105,7 +119,8 @@ function CouponOffer({ id }: { id: string }) {
     if (!order?.clientSecret || order.gateway !== 'stripe') return;
     let active = true;
     let element: StripePaymentElement | undefined;
-    getStripe().then(stripe => {
+    const pubKey = order.keyId || gatewayConfig.stripe?.publishableKey;
+    getStripe(pubKey).then(stripe => {
       if (!active || !stripe || !stripeContainer.current) return;
       const elements = stripe.elements({ clientSecret: order.clientSecret, appearance: { theme: 'night' } });
       const payment = elements.create('payment');
@@ -114,7 +129,7 @@ function CouponOffer({ id }: { id: string }) {
       payment.mount(stripeContainer.current); element = payment; elementsRef.current = elements;
     }).catch(error => { if (active) toastError('Payment form unavailable', errorMessage(error)); });
     return () => { active = false; element?.destroy(); elementsRef.current = null; };
-  }, [order, toastError]);
+  }, [order, gatewayConfig, toastError]);
 
   const run = async (action: () => Promise<void>) => {
     if (busyRef.current) return;
@@ -135,6 +150,7 @@ function CouponOffer({ id }: { id: string }) {
     return { success:true,gateway:saved.gateway,orderId:saved.orderId,clientSecret:result.clientSecret,keyId:result.keyId,
       amount:result.amount!,currency:result.currency!,receiptId:'' };
   };
+
   const directPay = () => run(async () => {
     if (!card) return;
     let next: GatewayCreateResponse | null;
@@ -148,14 +164,35 @@ function CouponOffer({ id }: { id: string }) {
     setStripeReady(false); setOrder(next);
     if (next.gateway === 'razorpay') {
       await loadRazorpayScript();
-      const payment = await openRazorpayCheckout({ keyId:next.keyId!,orderId:next.orderId,amountMinorUnit:next.amount,currency:next.currency,
-        name:'CouponVault',description:card.title,prefillEmail:user?.email });
-      const result = await verifyPayment('razorpay',payment.razorpay_order_id,payment.razorpay_payment_id,payment.razorpay_signature);
+      const keyId = next.keyId || gatewayConfig.razorpay?.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID;
+      if (!keyId) {
+        throw new Error('Razorpay payment gateway is not configured for this environment.');
+      }
+      let payment;
+      try {
+        payment = await openRazorpayCheckout({
+          keyId,
+          orderId: next.orderId,
+          amountMinorUnit: next.amount,
+          currency: next.currency,
+          name: 'CouponVault',
+          description: card.title,
+          prefillEmail: user?.email,
+          theme: '#4f46e5',
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('cancelled') || msg.includes('dismiss')) return;
+        throw err;
+      }
+      const result = await verifyPayment('razorpay', payment.razorpay_order_id, payment.razorpay_payment_id, payment.razorpay_signature);
       finish(result);
     }
   });
+
   const payStripe = () => run(async () => {
-    const stripe = await getStripe();
+    const pubKey = order?.keyId || gatewayConfig.stripe?.publishableKey;
+    const stripe = await getStripe(pubKey);
     if (!stripe || !elementsRef.current || !order) throw new Error('The payment form is not ready.');
     const result = await stripe.confirmPayment({elements:elementsRef.current,confirmParams:{return_url:`${window.location.origin}/dashboard/marketplace/coupon/${id}`},redirect:'if_required'});
     if (result.error) throw new Error(result.error.message || 'Payment was not completed.');
@@ -163,6 +200,7 @@ function CouponOffer({ id }: { id: string }) {
     if (verified.state === 'paid') finish(verified);
     else throw new Error('Payment is processing. Use Verify payment before trying again.');
   });
+
   const cancelDirect = () => run(async () => {
     if (!pending) return;
     const result: CouponPaymentRecovery = await abandonCouponPayment(pending.gateway,pending.orderId);
@@ -170,6 +208,7 @@ function CouponOffer({ id }: { id: string }) {
     savePending(null); setOrder(null); setStripeReady(false);
     success('Direct checkout cancelled', 'Any payment that arrives later will be kept in your wallet.');
   });
+
   const walletPay = () => run(async () => {
     if (!card || !user || (!walletRequest.current && unavailable) || pending) return;
     const key = `${recoveryKey}_wallet`;
@@ -217,10 +256,68 @@ function CouponOffer({ id }: { id: string }) {
           {balance < card.price && <p className="offer-note">Your wallet balance is too low. Choose direct payment or <Link to="/dashboard/wallet">add funds</Link>.</p>}
           <div className="offer-divider"><CreditCard size={17}/> Direct payment</div>
           {optionsError && <p className="offer-warning">{optionsError}</p>}
-          {!pending && gateways.length > 1 && <label>Payment provider<select className="input offer-wide" value={gateway} disabled={busy} onChange={e => setGateway(e.target.value as PaymentGateway)}>{gateways.map(g => <option key={g} value={g}>{g === 'razorpay' ? 'Razorpay · UPI / cards' : 'Stripe · cards & local methods'}</option>)}</select></label>}
-          {!pending && gateways.length === 0 && !optionsError && <p className="offer-note">Direct payment is not configured for this account. Wallet payment is available.</p>}
+          {!pending && gateways.length > 1 && (
+            <div className="offer-gateway-picker">
+              <span className="offer-picker-label">Select payment method</span>
+              <div className="offer-gateway-grid">
+                {gateways.map(g => (
+                  <button
+                    key={g}
+                    type="button"
+                    disabled={busy}
+                    className={`offer-gateway-option ${gateway === g ? 'active' : ''}`}
+                    onClick={() => setGateway(g)}
+                  >
+                    <div className="offer-gw-content">
+                      <span className="offer-gw-title">
+                        {g === 'razorpay' ? 'Razorpay' : g === 'stripe' ? 'Stripe' : 'PayPal'}
+                      </span>
+                      <span className="offer-gw-subtitle">
+                        {g === 'razorpay' ? 'UPI · Cards · NetBanking' : g === 'stripe' ? 'Credit & Debit Cards' : 'PayPal Account / Cards'}
+                      </span>
+                    </div>
+                    {gateway === g && <span className="offer-gw-badge">Selected</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {!pending && gateways.length === 1 && (
+            <div className="offer-provider-badge">
+              <Zap size={14} />
+              <span>Paying with <strong>{gateway === 'razorpay' ? 'Razorpay (UPI, Cards, NetBanking)' : gateway === 'stripe' ? 'Stripe (Cards)' : 'PayPal'}</strong></span>
+            </div>
+          )}
+          {!pending && gateways.length === 0 && !optionsError && (
+            <div className="offer-direct-unavail">
+              <p className="offer-note">
+                Direct payment is not configured for this account. Wallet payment is available.
+              </p>
+              {balance < card.price && (
+                <Link to="/dashboard/wallet" className="btn btn-secondary offer-wide" style={{marginTop: '0.6rem'}}>
+                  Top up wallet to buy
+                </Link>
+              )}
+            </div>
+          )}
           {pending && <p className="offer-note" role="status">You have a saved checkout. Resume or verify this payment before paying again.</p>}
-          {(!order || order.gateway !== 'stripe') && <button className="btn btn-secondary offer-wide" disabled={busy || !!walletRequestId || (!pending && (!!unavailable || !gateways.length))} onClick={() => void directPay()}>{busy ? 'Please wait…' : pending ? 'Resume direct payment' : `Pay directly · ${money(card.price)}`}</button>}
+          {gateways.length > 0 && (!order || order.gateway !== 'stripe') && (
+            <button
+              className="btn btn-secondary offer-wide offer-direct-btn"
+              disabled={busy || !!walletRequestId || (!pending && (!!unavailable || !gateways.length))}
+              onClick={() => void directPay()}
+            >
+              {busy ? (
+                <span className="offer-btn-loading">
+                  <RefreshCw size={15} className="spin" /> Please wait…
+                </span>
+              ) : pending ? (
+                'Resume direct payment'
+              ) : (
+                `Pay directly · ${money(card.price)}`
+              )}
+            </button>
+          )}
           {order?.gateway === 'stripe' && <div><div ref={stripeContainer} className="offer-stripe"/><button className="btn btn-primary offer-wide" disabled={busy || !stripeReady} onClick={() => void payStripe()}>{busy ? 'Verifying payment…' : `Pay ${money(order.amount / 100)}`}</button></div>}
           {pending && <><button className="btn btn-secondary offer-wide" disabled={busy} onClick={() => void run(async () => {const result = await recoverCouponPayment(pending.gateway,pending.orderId);if (result.state === 'paid') finish(result); else if(result.state === 'cancelled'){savePending(null);setOrder(null);}else toastError('Payment not completed','Resume your saved checkout, or verify again if payment is processing.');})}>Verify payment</button><button className="btn btn-secondary offer-wide" disabled={busy} onClick={() => void cancelDirect()}>Cancel direct checkout</button><p className="offer-note">If a delayed payment arrives after cancellation, it will be kept in your wallet.</p></>}
           <p className="offer-note">If this offer sells out or changes during payment, the full amount will be saved to your wallet. We never issue a different coupon automatically.</p>

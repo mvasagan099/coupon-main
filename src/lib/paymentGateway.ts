@@ -190,12 +190,15 @@ export function openRazorpayCheckout(options: {
 // ── Stripe ─────────────────────────────────────────────────────────────────────
 
 let stripePromise: Promise<Stripe | null> | null = null;
+let currentStripeKey: string | null = null;
 
 /** Lazily loads the Stripe.js SDK */
-export function getStripe(): Promise<Stripe | null> {
-  if (!stripePromise) {
-    const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
-    stripePromise = loadStripe(publishableKey ?? '');
+export function getStripe(publishableKey?: string): Promise<Stripe | null> {
+  const key = publishableKey || import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '';
+  if (!key) return Promise.resolve(null);
+  if (!stripePromise || currentStripeKey !== key) {
+    currentStripeKey = key;
+    stripePromise = loadStripe(key);
   }
   return stripePromise;
 }
@@ -242,7 +245,22 @@ export async function recoverStripePayment(intentId: string): Promise<StripeReco
   return serverPost('/api/v1/payments/stripe/recover', {intentId});
 }
 
-export async function getCouponPaymentOptions(): Promise<{gateways: PaymentGateway[]}> {
+export interface GatewayPublicConfig {
+  keyId?: string;
+  publishableKey?: string;
+  clientId?: string;
+}
+
+export interface CouponPaymentOptionsResponse {
+  gateways: PaymentGateway[];
+  config?: {
+    razorpay?: GatewayPublicConfig;
+    stripe?: GatewayPublicConfig;
+    paypal?: GatewayPublicConfig;
+  };
+}
+
+export async function getCouponPaymentOptions(): Promise<CouponPaymentOptionsResponse> {
   return serverPost('/api/v1/payments/coupon/options', {});
 }
 export async function createCouponPayment(gateway: PaymentGateway, giftCardId: string, expectedPrice: number): Promise<GatewayCreateResponse> {

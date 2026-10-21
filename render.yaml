@@ -31,6 +31,23 @@ services:
         sync: false
       - key: LOTTERY_API_KEY
         sync: false
+      # Direct Payment Providers (Server-side)
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
 
   # ── Coupon Frontend Static Site ───────────────────────────────────────────────
   - type: web
@@ -67,8 +84,12 @@ services:
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
-      # Payment gateway public key (PayPal is the only supported deposit method)
+      # Payment gateway public keys
       - key: VITE_PAYPAL_CLIENT_ID
+        sync: false
+      - key: VITE_RAZORPAY_KEY_ID
+        sync: false
+      - key: VITE_STRIPE_PUBLISHABLE_KEY
         sync: false
       # Coupon API backend URL
       - key: VITE_API_URL
