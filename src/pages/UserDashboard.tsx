@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark, Copy, MapPin, QrCode } from 'lucide-react';
+import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark, Copy, MapPin, QrCode, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { DashboardCard } from '../components/GlassCard';
@@ -2004,19 +2004,38 @@ export default function UserDashboard() {
         const activeMeta = resolveVoucherMeta(activeVoucher);
         const isCodeVisible = !!visibleCodes[activeVoucher.id];
         return createPortal(
-          <div className="glass-modal-overlay">
-            <div className="glass-modal-panel fade-in" style={{ maxWidth: '440px', padding: 0, overflow: 'hidden', borderRadius: '24px' }}>
+          <div
+            className="glass-modal-overlay"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setActiveVoucher(null);
+            }}
+          >
+            <div
+              className="glass-modal-panel glass-modal-panel--flush fade-in"
+              style={{
+                maxWidth: '420px',
+                width: '100%',
+                maxHeight: 'min(92dvh, 740px)',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: 0,
+                overflow: 'hidden',
+                borderRadius: '24px',
+                boxShadow: '0 24px 64px rgba(0, 0, 0, 0.28)',
+              }}
+            >
               {/* Modal Brand Artwork Banner */}
               <div
                 style={{
-                  minHeight: '125px',
+                  minHeight: '115px',
                   position: 'relative',
-                  padding: '1.25rem 1.25rem 1rem',
+                  padding: '1rem 1.15rem 0.85rem',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
                   overflow: 'hidden',
                   color: '#fff',
+                  flexShrink: 0,
                 }}
               >
                 <div
@@ -2031,57 +2050,58 @@ export default function UserDashboard() {
                   style={{
                     position: 'absolute',
                     inset: 0,
-                    background: 'linear-gradient(180deg, rgba(10,14,23,0.45) 0%, rgba(10,14,23,0.88) 100%)',
+                    background: 'linear-gradient(180deg, rgba(10,14,23,0.7) 0%, rgba(10,14,23,0.92) 100%)',
                     zIndex: 1,
                   }}
                 />
 
                 <div style={{ position: 'relative', zIndex: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0 }}>
                     {activeMeta.logoUrl ? (
-                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#fff', padding: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+                      <div style={{ width: '38px', height: '38px', borderRadius: '11px', background: '#fff', padding: '3px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)', display: 'grid', placeItems: 'center', overflow: 'hidden', flexShrink: 0 }}>
                         <img src={activeMeta.logoUrl} alt={`${activeMeta.companyName} logo`} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                       </div>
                     ) : (
                       <div
                         style={{
-                          width: '40px',
-                          height: '40px',
-                          borderRadius: '12px',
+                          width: '38px',
+                          height: '38px',
+                          borderRadius: '11px',
                           background: 'linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(220,230,250,0.9) 100%)',
                           color: '#0f172a',
                           display: 'grid',
                           placeItems: 'center',
                           fontWeight: 900,
-                          fontSize: '0.9rem',
+                          fontSize: '0.88rem',
                           letterSpacing: '0.04em',
                           boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
                           border: '1px solid rgba(255,255,255,0.6)',
+                          flexShrink: 0,
                         }}
                       >
                         {getMonogram(activeMeta.companyName)}
                       </div>
                     )}
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', letterSpacing: '0.01em' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', overflow: 'hidden' }}>
+                        <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {activeMeta.companyName}
                         </span>
-                        <ShieldCheck size={15} style={{ color: '#80f9c8', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))' }} />
+                        <ShieldCheck size={14} style={{ color: '#80f9c8', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))', flexShrink: 0 }} />
                       </div>
-                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.1rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', marginTop: '0.1rem', flexWrap: 'wrap' }}>
                         {activeMeta.prefix && (
-                          <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'rgba(255,255,255,0.85)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          <span style={{ fontSize: '0.62rem', fontWeight: 700, color: 'rgba(255,255,255,0.85)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                             Node: {activeMeta.prefix}
                           </span>
                         )}
-                        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.7)' }}>• ID: {activeVoucher.id.substring(0, 8).toUpperCase()}</span>
+                        <span style={{ fontSize: '0.62rem', color: 'rgba(255,255,255,0.7)' }}>• ID: {activeVoucher.id.substring(0, 8).toUpperCase()}</span>
                         {activeMeta.redemptionDestination ? (
-                          <span className={`badge voucher-artwork-badge ${getDestinationMeta(activeMeta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
+                          <span className={`badge voucher-artwork-badge ${getDestinationMeta(activeMeta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
                             {getDestinationMeta(activeMeta.redemptionDestination)?.icon} {getDestinationMeta(activeMeta.redemptionDestination)?.shortLabel}
                           </span>
                         ) : (
-                          <span className="badge voucher-artwork-badge badge-amber" style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
+                          <span className="badge voucher-artwork-badge badge-amber" style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
                             ⚠️ Unclassified
                           </span>
                         )}
@@ -2090,55 +2110,65 @@ export default function UserDashboard() {
                   </div>
 
                   <button
-                    className="btn btn-secondary btn-sm"
+                    type="button"
                     onClick={() => setActiveVoucher(null)}
+                    aria-label="Close modal"
+                    title="Close"
                     style={{
-                      background: 'rgba(15,23,42,0.65)',
-                      color: '#fff',
-                      border: '1px solid rgba(255,255,255,0.2)',
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      background: 'rgba(0, 0, 0, 0.55)',
+                      border: '1px solid rgba(255, 255, 255, 0.25)',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
                       backdropFilter: 'blur(8px)',
-                      borderRadius: '8px',
-                      padding: '0.3rem 0.7rem',
+                      WebkitBackdropFilter: 'blur(8px)',
+                      flexShrink: 0,
+                      transition: 'all 0.18s ease',
                     }}
                   >
-                    Close
+                    <X size={16} />
                   </button>
                 </div>
 
-                <div style={{ position: 'relative', zIndex: 2, marginTop: '0.8rem' }}>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.7)', letterSpacing: '0.01em' }}>
+                <div style={{ position: 'relative', zIndex: 2, marginTop: '0.6rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.7)', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {activeMeta.title}
                   </h3>
                   {activeMeta.address && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'rgba(255,255,255,0.82)', fontSize: '0.75rem', marginTop: '0.2rem' }}>
-                      <MapPin size={12} />
-                      <span>{activeMeta.address}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'rgba(255,255,255,0.82)', fontSize: '0.72rem', marginTop: '0.15rem' }}>
+                      <MapPin size={12} style={{ flexShrink: 0 }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeMeta.address}</span>
                     </div>
                   )}
                 </div>
               </div>
 
               {/* Modal Body */}
-              <div style={{ padding: '1.25rem' }}>
+              <div style={{ padding: '0.95rem 1rem 1rem', overflowY: 'auto', flex: 1, minHeight: 0 }}>
                 {/* Destination info notice */}
-                <div style={{ background: 'var(--surface-soft)', padding: '0.75rem 0.9rem', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1rem' }}>
-                  <span style={{ fontSize: '1.25rem' }}>
+                <div style={{ background: 'var(--surface-soft)', padding: '0.55rem 0.75rem', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '1.2rem', flexShrink: 0, lineHeight: 1 }}>
                     {getDestinationMeta(activeMeta.redemptionDestination)?.icon || '⚠️'}
                   </span>
                   <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-1)' }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-1)' }}>
                       {getDestinationMeta(activeMeta.redemptionDestination)?.label || 'Unclassified Voucher'}
                     </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', lineHeight: 1.35 }}>
                       {getDestinationMeta(activeMeta.redemptionDestination)?.description || 'Unclassified coupons cannot be redeemed externally until assigned by an administrator.'}
                     </div>
                   </div>
                 </div>
 
                 {/* QR Code Container */}
-                <div style={{ background: '#ffffff', borderRadius: '20px', padding: '1.2rem', display: 'grid', placeItems: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
-                  <QRCode value={activeVoucher.code} size={190} fgColor="#0f172a" />
-                  <span style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.6rem', fontWeight: 600 }}>
+                <div style={{ background: '#ffffff', borderRadius: '16px', padding: '0.85rem', display: 'grid', placeItems: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.06)', border: '1px solid rgba(0,0,0,0.06)' }}>
+                  <QRCode value={activeVoucher.code} size={144} fgColor="#0f172a" style={{ height: 'auto', maxWidth: '100%', width: '144px' }} />
+                  <span style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '0.5rem', fontWeight: 600, textAlign: 'center', lineHeight: 1.35 }}>
                     {activeMeta.redemptionDestination === 'gaming'
                       ? '🎮 Redeem directly inside the Gaming application'
                       : activeMeta.redemptionDestination === 'lottery'
@@ -2148,9 +2178,9 @@ export default function UserDashboard() {
                 </div>
 
                 {/* Voucher Code Box */}
-                <div className="glass-card-strong" style={{ borderRadius: '16px', padding: '0.9rem', marginTop: '1rem', border: '1.5px solid var(--border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.65rem', marginBottom: '0.65rem' }}>
-                    <div className="mono" style={{ fontWeight: 800, letterSpacing: '0.06em', fontSize: '1.1rem', color: 'var(--text-1)' }}>
+                <div className="glass-card-strong" style={{ borderRadius: '14px', padding: '0.75rem 0.85rem', marginTop: '0.75rem', border: '1.5px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <div className="mono" style={{ fontWeight: 800, letterSpacing: '0.06em', fontSize: '1.05rem', color: 'var(--text-1)' }}>
                       {isCodeVisible ? activeVoucher.code : '••••••••••••'}
                     </div>
                     <button
@@ -2162,15 +2192,15 @@ export default function UserDashboard() {
                         border: '1px solid var(--border)',
                         cursor: 'pointer',
                         color: 'var(--text-2)',
-                        padding: '6px',
-                        borderRadius: '8px',
+                        padding: '5px',
+                        borderRadius: '7px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
                       type="button"
                     >
-                      {isCodeVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                      {isCodeVisible ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
                     <button
                       onClick={() => void copyVoucherCode(activeVoucher.code)}
@@ -2181,19 +2211,19 @@ export default function UserDashboard() {
                         border: '1px solid var(--border)',
                         cursor: 'pointer',
                         color: 'var(--text-2)',
-                        padding: '6px',
-                        borderRadius: '8px',
+                        padding: '5px',
+                        borderRadius: '7px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
                       type="button"
                     >
-                      <Copy size={15} />
+                      <Copy size={14} />
                     </button>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', color: 'var(--text-3)', fontSize: '0.84rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.6rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', color: 'var(--text-3)', fontSize: '0.78rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.5rem' }}>
                     <span>
                       Available: <strong style={{ color: 'var(--cyan)' }}>{formatCurrency(activeVoucher.remaining_balance ?? 0, userCurrency)}</strong>
                       {activeMeta.faceValue != null && ` (of ${formatCurrency(activeMeta.faceValue, userCurrency)})`}
@@ -2203,17 +2233,17 @@ export default function UserDashboard() {
                 </div>
 
                 {activeMeta.description && (
-                  <p style={{ margin: '0.75rem 0 0', fontSize: '0.8rem', color: 'var(--text-3)', lineHeight: 1.5, textAlign: 'center' }}>
+                  <p style={{ margin: '0.55rem 0 0', fontSize: '0.75rem', color: 'var(--text-3)', lineHeight: 1.45, textAlign: 'center' }}>
                     {activeMeta.description}
                   </p>
                 )}
 
                 <button
                   className="btn btn-primary"
-                  style={{ width: '100%', marginTop: '1rem', padding: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', fontWeight: 700 }}
+                  style={{ width: '100%', marginTop: '0.75rem', padding: '0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem', fontWeight: 700, fontSize: '0.88rem', borderRadius: '12px' }}
                   onClick={() => void copyVoucherCode(activeVoucher.code)}
                 >
-                  <Copy size={16} /> Copy voucher code
+                  <Copy size={15} /> Copy voucher code
                 </button>
               </div>
             </div>
@@ -2223,8 +2253,13 @@ export default function UserDashboard() {
       })()}
 
       {showWithdrawModal && createPortal(
-        <div className="glass-modal-overlay">
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '460px' }}>
+        <div
+          className="glass-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !withdrawLoading) setShowWithdrawModal(false);
+          }}
+        >
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '460px', width: '100%', maxHeight: 'min(92dvh, 740px)', overflowY: 'auto' }}>
             {withdrawStep === 1 && (
               <form onSubmit={handleWithdrawalSubmit} style={{ display: 'grid', gap: '1.1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
@@ -2474,8 +2509,13 @@ export default function UserDashboard() {
       )}
 
       {showAddMoneyModal && createPortal(
-        <div className="glass-modal-overlay">
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '460px' }}>
+        <div
+          className="glass-modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !addMoneyLoading) setShowAddMoneyModal(false);
+          }}
+        >
+          <div className="glass-modal-panel fade-in" style={{ maxWidth: '460px', width: '100%', maxHeight: 'min(92dvh, 740px)', overflowY: 'auto' }}>
             <div style={{ display: 'grid', gap: '1.2rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
