@@ -14,5 +14,5 @@ export function normalizeCardBackground(value: string | null | undefined): strin
 }
 export function cardBackgroundImage(value: string, dark = false): string {
   const image = normalizeCardBackground(value) ?? DEFAULT_CARD_BACKGROUND;
-  return `linear-gradient(135deg, rgba(3,7,18,${dark ? '.72' : '.35'}) 0%, rgba(3,7,18,${dark ? '.2' : '.65'}) 100%), url(${JSON.stringify(image)})`;
+  return `linear-gradient(90deg, rgba(8,11,18,${dark ? '0.92' : '0.65'}) 0%, rgba(8,11,18,${dark ? '0.78' : '0.4'}) 42%, rgba(8,11,18,${dark ? '0.12' : '0.05'}) 100%), url(${JSON.stringify(image)})`;
 }
