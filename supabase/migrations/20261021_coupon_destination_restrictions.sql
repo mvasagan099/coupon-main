@@ -296,30 +296,32 @@ $$;
 REVOKE ALL ON FUNCTION public.redeem_coupon_cv(uuid,uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.redeem_coupon_cv(uuid,uuid) TO authenticated;
 
--- 9. Update validate_coupon_by_id to also return redemption_destination.
+-- 9. Update validate_coupon_by_id and validate_coupon to also return redemption_destination.
 CREATE OR REPLACE FUNCTION public.validate_coupon_by_id(p_coupon_id UUID)
 RETURNS TABLE (
   coupon_id         UUID,
-  coupon_code       TEXT,
   company_name      TEXT,
+  coupon_code       TEXT,
   is_used           BOOLEAN,
   issued_at         TIMESTAMPTZ,
   remaining_balance NUMERIC,
   expiry_date       TIMESTAMPTZ,
   status            TEXT,
+  country_code      TEXT,
   redemption_destination TEXT
 ) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
   RETURN QUERY
   SELECT
     c.id,
-    c.code,
-    co.name,
+    co.name::text,
+    c.code::text,
     c.is_used,
     c.created_at,
     c.remaining_balance,
     c.expiry_date,
     c.status,
+    c.country_code::text,
     c.redemption_destination
   FROM public.coupons c
   JOIN public.companies co ON co.id = c.company_id
@@ -328,6 +330,95 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.validate_coupon_by_id(uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.validate_coupon_by_id(uuid) TO authenticated,service_role;
+
+CREATE OR REPLACE FUNCTION public.validate_coupon(p_code text)
+RETURNS TABLE (
+  coupon_id         UUID,
+  company_name      TEXT,
+  coupon_code       TEXT,
+  is_used           BOOLEAN,
+  issued_at         TIMESTAMPTZ,
+  remaining_balance NUMERIC,
+  expiry_date       TIMESTAMPTZ,
+  status            TEXT,
+  country_code      TEXT,
+  redemption_destination TEXT
+) LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    c.id,
+    co.name::text,
+    c.code::text,
+    c.is_used,
+    c.created_at,
+    c.remaining_balance,
+    c.expiry_date,
+    c.status,
+    c.country_code::text,
+    c.redemption_destination
+  FROM public.coupons c
+  JOIN public.companies co ON co.id = c.company_id
+  WHERE upper(trim(c.code)) = upper(trim(p_code));
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Invalid coupon code';
+  END IF;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.validate_coupon(text) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.validate_coupon(text) TO authenticated,service_role;
+
+-- 9b. Update get_gift_cards_with_counts to return redemption_destination
+CREATE OR REPLACE FUNCTION public.get_gift_cards_with_counts()
+ RETURNS TABLE(
+   id uuid,
+   title text,
+   description text,
+   price numeric,
+   value numeric,
+   company_id uuid,
+   banner_image text,
+   terms text,
+   issue_limit integer,
+   expiry_date timestamp with time zone,
+   created_at timestamp with time zone,
+   company_name text,
+   issued_count bigint,
+   is_active boolean,
+   country_code text,
+   currency text,
+   redemption_destination text
+ )
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+ SELECT 
+   g.id,
+   g.title,
+   g.description,
+   g.price,
+   g.value,
+   g.company_id,
+   g.banner_image,
+   g.terms,
+   g.issue_limit,
+   g.expiry_date,
+   g.created_at,
+   c.name,
+   (SELECT count(*) FROM public.coupons cp WHERE cp.gift_card_id=g.id),
+   g.is_active,
+   g.country_code,
+   g.currency,
+   COALESCE(g.redemption_destination, c.redemption_destination)
+ FROM public.gift_cards g 
+ JOIN public.companies c ON c.id=g.company_id
+ WHERE public.is_account_active(auth.uid()) AND (public.is_admin() OR c.owner_id=auth.uid()
+ OR (c.status='approved' AND g.is_active AND (g.expiry_date IS NULL OR g.expiry_date>now())));
+$function$;
+REVOKE ALL ON FUNCTION public.get_gift_cards_with_counts() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_gift_cards_with_counts() TO authenticated;
 
 -- 10. get_coupon_offer_details now exposes destination so marketplace can show badges.
 CREATE OR REPLACE FUNCTION public.get_coupon_offer_details(p_gift_card_id uuid)

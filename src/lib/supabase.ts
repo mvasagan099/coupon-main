@@ -495,7 +495,7 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     
     // If the RPC doesn't exist yet, fallback to the standard select
     if (error) {
-      let query = supabase.from("gift_cards").select("*, companies(name)");
+      let query = supabase.from("gift_cards").select("*, companies(name, redemption_destination)");
       if (companyId) {
         query = query.eq("company_id", companyId);
       }
@@ -514,6 +514,7 @@ export async function getGiftCards(companyId?: string): Promise<GiftCard[]> {
     const remoteCards: GiftCard[] = (data ?? []).map((d: any) => ({
       ...d,
       company_name: d.company_name || d.companies?.name,
+      redemption_destination: d.redemption_destination ?? d.companies?.redemption_destination ?? null,
       // Use the global count if available, otherwise fallback to local trackers
       issued_count: Math.max(d.issued_count || 0, issuedCounts[d.id] || 0)
     }));
