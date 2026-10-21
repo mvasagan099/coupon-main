@@ -16,6 +16,8 @@ export interface GatewayCreateResponse {
   amount: number;     // minor unit (paise / cents)
   currency: string;
   receiptId: string;
+  keyId?: string;
+  giftCardId?: string;
 }
 
 export interface GatewayVerifyResponse {
@@ -25,6 +27,9 @@ export interface GatewayVerifyResponse {
   currency: string;
   amountLocal?: number;
   exchangeRate?: number;
+  purchaseStatus?: 'issued' | 'wallet_credited';
+  couponId?: string;
+  message?: string;
 }
 
 export interface RazorpayPaymentResult {
@@ -235,4 +240,22 @@ export interface StripeRecoveryResult {
 }
 export async function recoverStripePayment(intentId: string): Promise<StripeRecoveryResult> {
   return serverPost('/api/v1/payments/stripe/recover', {intentId});
+}
+
+export async function getCouponPaymentOptions(): Promise<{gateways: PaymentGateway[]}> {
+  return serverPost('/api/v1/payments/coupon/options', {});
+}
+export async function createCouponPayment(gateway: PaymentGateway, giftCardId: string, expectedPrice: number): Promise<GatewayCreateResponse> {
+  return serverPost('/api/v1/payments/create', { gateway, giftCardId, expectedPrice });
+}
+export interface CouponPaymentRecovery extends Partial<GatewayVerifyResponse> {
+  state: 'paid' | 'resume' | 'cancelled' | 'processing';
+  orderId?: string; clientSecret?: string; keyId?: string;
+}
+export async function recoverCouponPayment(gateway: PaymentGateway, orderId: string): Promise<CouponPaymentRecovery> {
+  return serverPost('/api/v1/payments/coupon/recover', {gateway,orderId});
+}
+
+export async function abandonCouponPayment(gateway: PaymentGateway, orderId: string): Promise<CouponPaymentRecovery> {
+  return serverPost('/api/v1/payments/coupon/abandon', {gateway,orderId});
 }

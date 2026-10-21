@@ -1573,3 +1573,22 @@ export async function adminGetAccountLocks(): Promise<Record<string, boolean>> {
   if (error) throw error;
   return Object.fromEntries((data ?? []).map((row: { id: string; is_locked: boolean }) => [row.id, row.is_locked]));
 }
+
+export interface CouponOfferDetails {
+  coupon: GiftCard & { available_count: number };
+  company: { name: string; address: string | null; joined_at: string; status: string };
+}
+
+// No local catalogue fallback for a page that can take payment.
+export async function getCouponOfferDetails(id: string): Promise<CouponOfferDetails | null> {
+  const { data, error } = await withTimeout(supabase.rpc('get_coupon_offer_details', { p_gift_card_id: id }));
+  if (error) throw error;
+  return data;
+}
+
+export async function purchaseGiftCardOnce(giftCardId: string, expectedPrice: number, requestId: string): Promise<{coupon_id: string; order_id: string}> {
+  const {data,error}=await withTimeout(supabase.rpc('purchase_coupon_once',{p_gift_card_id:giftCardId,p_expected_price:expectedPrice,p_request_id:requestId}));
+  if(error) throw error;
+  if(!data?.coupon_id) throw new Error('Coupon confirmation is pending. Retry the same purchase.');
+  return data;
+}

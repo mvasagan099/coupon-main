@@ -12,6 +12,7 @@ const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const CouponOfferPage = lazy(() => import('./pages/CouponOfferPage'));
 const UserDashboard = lazy(() => import('./pages/UserDashboard'));
 const MerchantDashboard = lazy(() => import('./pages/MerchantDashboard'));
 const CouponPage = lazy(() => import('./pages/CouponPage'));
@@ -88,6 +89,7 @@ function App() {
                     path="dashboard"
                     element={<Navigate to="/dashboard/marketplace" replace />}
                   />
+                  <Route path="dashboard/marketplace/coupon/:id" element={<ProtectedRoute><CouponOfferPage /></ProtectedRoute>} />
                   <Route
                     path="dashboard/:section"
                     element={

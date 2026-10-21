@@ -90,6 +90,14 @@ export class RazorpayService implements PaymentServiceI {
     };
   }
 
+  // Recovery uses authenticated provider data, never a browser claim or an unsigned callback.
+  async findCapturedOrderPayment(orderId: string): Promise<VerifyPaymentResult | null> {
+    const payments = await this.client.orders.fetchPayments(orderId);
+    const payment = payments.items.find(item => item.order_id === orderId && item.status === 'captured');
+    if (!payment) return null;
+    return { verified:true, amount:Number(payment.amount)/100, currency:payment.currency, gatewayPaymentId:payment.id };
+  }
+
   async capturePayment(gatewayPaymentId: string): Promise<{ amount: number; currency: string }> {
     // Razorpay auto-captures when payment_capture: true in order creation.
     // This method is provided for manual-capture flows if needed.

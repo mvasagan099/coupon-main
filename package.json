@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test:workflows": "node --test tests/workflows.test.cjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:checkout-db": "node --test tests/checkout-db.test.cjs"
   },
   "dependencies": {
     "@paypal/react-paypal-js": "^10.2.1",
@@ -23,6 +24,7 @@
     "react-use": "^17.6.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/postcss": "^4.2.4",
     "@tailwindcss/vite": "^4.2.4",

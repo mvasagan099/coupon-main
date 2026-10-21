@@ -1,10 +1,11 @@
+import { formatOfferDate } from '../lib/couponOffer';
 import { normalizeCardBackground, DEFAULT_CARD_BACKGROUND } from '../lib/cardBackgrounds';
 import { voucherState } from '../lib/voucherState';
 import { useNow } from '../hooks/useNow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCode } from 'react-qr-code';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Eye, EyeOff, SearchX, Wallet, CreditCard, Activity, ArrowLeftRight, Gift, Zap, ShieldCheck, ArrowUpRight, ArrowDownLeft, CheckCircle2, Landmark } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -27,7 +28,6 @@ import {
   getRedemptionTransactions,
   getUserGiftCards,
   getUserOrders,
-  purchaseGiftCard,
   createWithdrawal,
   getUserWithdrawals,
   getUserDeposits,
@@ -148,9 +148,6 @@ export default function UserDashboard() {
   const [userCurrency, setUserCurrency]       = useState<string>('USD');
   const [profileCountry, setProfileCountry]   = useState<CountryInfo | null>(null);
   const [savingProfile, setSavingProfile]     = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<GiftCard | null>(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentLoading, setPaymentLoading] = useState(false);
   const [activeVoucher, setActiveVoucher] = useState<Coupon | null>(null);
   const [visibleCodes, setVisibleCodes] = useState<Record<string, boolean>>({});
 
@@ -294,7 +291,7 @@ export default function UserDashboard() {
   }, [authLoading, userId, loadData]);
 
   useEffect(() => {
-    const isAnyModalOpen = !!activeVoucher || showPaymentModal || showWithdrawModal || showAddMoneyModal;
+    const isAnyModalOpen = !!activeVoucher || showWithdrawModal || showAddMoneyModal;
     if (isAnyModalOpen) {
       document.body.style.overflow = 'hidden';
       document.body.classList.add('body-modal-open');
@@ -307,55 +304,7 @@ export default function UserDashboard() {
       document.body.style.overflow = '';
       document.body.classList.remove('body-modal-open');
     };
-  }, [activeVoucher, showPaymentModal, showWithdrawModal, showAddMoneyModal]);
-
-  const handleInitiatePurchase = (card: GiftCard) => {
-    setSelectedProduct(card);
-    setShowPaymentModal(true);
-  };
-
-  const handleConfirmWalletPayment = async () => {
-    if (!selectedProduct || !user) return;
-
-    if (!userCountryCode || selectedProduct.country_code !== userCountryCode) { toastError('Country restricted', 'This coupon is only available in its selected country.'); return; }
-    if (walletBalance < selectedProduct.price) {
-      toastError('Insufficient funds', 'Your wallet balance is lower than the purchase price.');
-      return;
-    }
-
-    setPaymentLoading(true);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-
-      // CRIT-05: Deduction is handled server-side by purchaseGiftCard (via Supabase RPC).
-      // We never set wallet_balance directly from the client.
-      const result = await purchaseGiftCard(
-        selectedProduct.id,
-        user.id,
-        user.email || 'customer@demo.com',
-        selectedProduct.price,
-      );
-
-      // Re-sync balance from server (authoritative source)
-      await refreshWalletBalance();
-
-      success('Payment authorized', `Voucher code generated: ${result.coupon_code}`);
-      setShowPaymentModal(false);
-      setSelectedProduct(null);
-      navigate('/dashboard/cards');
-      loadData();
-    } catch (err: unknown) {
-      // On failure, refresh balance from server to show the accurate amount
-      await refreshWalletBalance();
-      toastError('Gateway error', getErrorMessage(err, 'Transaction authorization failed.'));
-    } finally {
-      setPaymentLoading(false);
-    }
-  };
-
-
-
-
+  }, [activeVoucher, showWithdrawModal, showAddMoneyModal]);
 
   // ── Razorpay payment handler ─────────────────────────────────────────────────
   const handleRazorpayPayment = async () => {
@@ -813,7 +762,7 @@ export default function UserDashboard() {
                   const savingsPct = val > 0 ? Math.round((savings / val) * 100) : 0;
 
                   return (
-                    <div key={card.id} className="card card-hover card-lift marketplace-card" style={{ padding: '1rem', position: 'relative' }}>
+                    <Link key={card.id} to={`/dashboard/marketplace/coupon/${card.id}`} aria-label={`View ${card.title} coupon details`} className="card card-hover card-lift marketplace-card" style={{ padding: '1rem', position: 'relative', textDecoration: 'none', color: 'inherit' }}>
                       <div className="img-zoom"
                         style={{
                           minHeight: '220px',
@@ -852,6 +801,7 @@ export default function UserDashboard() {
                       </div>
 
                       <div style={{ padding: '1rem 0.35rem 0 0.35rem' }}>
+                        <p style={{ margin: '0 0 0.75rem', color: 'var(--text-2)', fontSize: '0.85rem' }}>Expires: {formatOfferDate(card.expiry_date)}</p>
                         <p style={{ margin: '0 0 0.85rem', color: 'var(--text-3)', lineHeight: 1.6, fontSize: '0.88rem' }}>{card.description}</p>
 
                         {card.issue_limit ? (() => {
@@ -864,22 +814,14 @@ export default function UserDashboard() {
                               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isSoldOut ? 'var(--red)' : 'var(--amber)' }}>
                                 {isSoldOut ? 'Sold out!' : `Only ${remaining} left`}
                               </span>
-                              <button
-                                className={`btn ${isSoldOut ? 'btn-secondary' : 'btn-primary'} btn-sm`}
-                                disabled={isSoldOut}
-                                onClick={() => handleInitiatePurchase(card)}
-                              >
-                                {isSoldOut ? 'Out of stock' : 'Buy gift card'}
-                              </button>
+                              <span className="btn btn-secondary btn-sm">View details</span>
                             </div>
                           );
                         })() : (
-                          <button className="btn btn-primary btn-sm" onClick={() => handleInitiatePurchase(card)}>
-                            Buy gift card
-                          </button>
+                          <span className="btn btn-secondary btn-sm">View details</span>
                         )}
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
@@ -1668,59 +1610,6 @@ export default function UserDashboard() {
             >
               Copy voucher code
             </button>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {showPaymentModal && selectedProduct && createPortal(
-        <div className="glass-modal-overlay">
-          <div className="glass-modal-panel fade-in" style={{ maxWidth: '480px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
-              <div>
-                <span className="section-label"><Zap size={13} style={{ display: 'inline', marginRight: '0.3rem', verticalAlign: 'middle' }} /> Checkout</span>
-                <h3 style={{ margin: '0.35rem 0 0', fontSize: '1.4rem', letterSpacing: '0.02em', wordSpacing: '0.08em', }}>
-                  {selectedProduct.title}
-                </h3>
-              </div>
-              <button className="btn btn-secondary btn-sm" onClick={() => { setShowPaymentModal(false); setSelectedProduct(null); }} style={{ flexShrink: 0 }}>
-                Close
-              </button>
-            </div>
-
-            <div className="glass-card-strong" style={{ padding: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
-                <span style={{ color: 'var(--text-3)' }}>Face Value</span>
-                <strong>{formatCurrency(selectedProduct.value ?? 0, userCurrency)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.6rem', fontSize: '0.95rem' }}>
-                <span style={{ color: 'var(--text-3)' }}>Purchase Price</span>
-                <strong style={{ color: 'var(--primary)', fontSize: '1.1rem' }}>
-                  {formatCurrency((selectedProduct.price ?? 0), userCurrency)}
-                </strong>
-              </div>
-
-            </div>
-            {/* Remove name and method fields as they are not used for wallet purchases */}
-
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.5rem' }}>
-              <div style={{ flex: 1, padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.03)', borderRadius: '14px' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Wallet Balance</div>
-                <strong style={{ fontSize: '1.1rem' }}>
-                  {formatCurrency(walletBalance, userCurrency)}
-                </strong>
-              </div>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1.5, padding: '0.9rem', fontSize: '0.95rem', fontWeight: 700, borderRadius: '12px' }}
-                disabled={paymentLoading || walletBalance < selectedProduct.price}
-                onClick={handleConfirmWalletPayment}
-              >
-                {paymentLoading ? (
-                  <><span className="spinner" /> Processing...</>
-                ) : walletBalance < selectedProduct.price ? 'Insufficient Funds' : 'Pay from Wallet'}
-              </button>
-            </div>
           </div>
         </div>,
         document.body

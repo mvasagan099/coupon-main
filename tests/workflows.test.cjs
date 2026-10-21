@@ -171,3 +171,22 @@ test('Next cancels default submission before switching to the final campaign ste
   const control = compile('export function next(){return (' + button.getText(tree) + ')}', { require, wizardStep: step, setWizardStep: value => { step = value; } }).next();
   control.props.onClick({ preventDefault() { prevented = true; } }); assert.equal(prevented, true); assert.equal(step, 3); assert.equal(control.props.type, 'button');
 });
+
+test('offer dates and purchase eligibility reject expired, disabled and sold-out offers', () => {
+  const {formatOfferDate,offerUnavailable}=compile(fs.readFileSync(path.join(root,'src/lib/couponOffer.ts'),'utf8'),{});
+  assert.equal(formatOfferDate(null),'No expiry set');assert.equal(formatOfferDate('invalid'),'Date unavailable');
+  const offer={is_active:true,expiry_date:'2099-01-01',price:450,value:500,available_count:1};
+  assert.equal(offerUnavailable(offer,Date.parse('2026-10-21')),null);
+  for(const change of [{is_active:false},{expiry_date:'2020-01-01'},{expiry_date:'invalid'},{available_count:0},{price:0},{value:NaN}]) assert.ok(offerUnavailable({...offer,...change}));
+});
+test('wallet purchases preserve retry identity and fail closed without a confirmed coupon', async () => {
+  const calls=[];let fail=true;
+  const fn=helper('purchaseGiftCardOnce',{withTimeout:async p=>p,supabase:{rpc:async(name,args)=>{calls.push({name,...args});if(fail){fail=false;return {error:Error('lost response')};}return {data:{coupon_id:'coupon',order_id:'order'},error:null};}}});
+  await assert.rejects(fn('offer',450,'same-request'),/lost response/);
+  assert.equal((await fn('offer',450,'same-request')).coupon_id,'coupon');assert.deepEqual(calls[0],calls[1]);assert.equal(calls[0].name,'purchase_coupon_once');
+});
+test('marketplace opens accessible details links and no longer has inline purchase actions',()=>{
+  const source=fs.readFileSync(path.join(root,'src/pages/UserDashboard.tsx'),'utf8');
+  assert.match(source,/to=\{`\/dashboard\/marketplace\/coupon\/\$\{card.id\}`\}/);assert.match(source,/Expires: \{formatOfferDate\(card.expiry_date\)\}/);
+  assert.doesNotMatch(source,/handleInitiatePurchase|handleConfirmWalletPayment|Buy gift card/);
+});

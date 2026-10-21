@@ -24,7 +24,7 @@ export async function settlePayment(client: SupabaseClient, gateway: PaymentGate
     p_amount: payment.amount,
     p_currency: payment.currency.toUpperCase(),
   });
-  if (error || !data) throw new Error('Payment received; wallet credit is pending. Retry verification with the same order.');
+  if (error || !data) throw new Error('Payment received; settlement is pending. Retry verification with the same order.');
   return { amount: Number(transaction.amount_major), amountLocal: payment.amount,
     currency: payment.currency, exchangeRate: 1, ...data };
 }
