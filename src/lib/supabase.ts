@@ -136,7 +136,7 @@ export interface Order {
   payment_details?: any;
   created_at: string;
   company?: { name: string; prefix: string };
-  coupon?: { code: string; is_used: boolean; remaining_balance: number; status: string } | null;
+  coupon?: { code: string; amount?: number; country_code?: string; expiry_date?: string; is_used: boolean; remaining_balance: number; status: string } | null;
 }
 
 export interface CouponValidation {
@@ -584,7 +584,7 @@ export async function getUserOrders(userId: string) {
         .select(`
           *,
           company:companies(name, prefix),
-          coupon:coupons(code, is_used, remaining_balance, status)
+          coupon:coupons(code, amount, country_code, expiry_date, is_used, remaining_balance, status)
         `)
         .eq("user_id", userId)
         .eq("status", "paid")

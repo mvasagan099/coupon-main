@@ -190,3 +190,14 @@ test('marketplace opens accessible details links and no longer has inline purcha
   assert.match(source,/to=\{`\/dashboard\/marketplace\/coupon\/\$\{card.id\}`\}/);assert.match(source,/Expires: \{formatOfferDate\(card.expiry_date\)\}/);
   assert.doesNotMatch(source,/handleInitiatePurchase|handleConfirmWalletPayment|Buy gift card/);
 });
+
+test('the purchased ticket distinguishes face value from price and uses the coupon country currency',()=>{
+ const source=fs.readFileSync(path.join(root,'src/pages/CouponPage.tsx'),'utf8');
+ const render=(country)=>{
+  const order={amount:450,company:{name:'Merchant'},coupon:{amount:500,remaining_balance:500,country_code:country,expiry_date:'2099-01-01',is_used:false}};
+  let state=0;
+  const exports=compile(source,{window:{location:{origin:'https://example.invalid'}},require:name=>name==='react'?{useState:()=>[state++===0?order:state===2?false:null,()=>{}],useEffect:()=>{}}:name==='react/jsx-runtime'?{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})}:name==='react-router-dom'?{useParams:()=>({id:'coupon'}),useNavigate:()=>()=>{}}:name.includes('AuthContext')?{useAuth:()=>({user:{id:'user'}})}:name.includes('countries')?{getCountryByCode:code=>({currency:code==='US'?'USD':'INR'})}:name.includes('exchangeRate')?{formatCurrency:(value,currency)=>`${currency} ${value.toFixed(2)}`}:name.includes('couponOffer')?{formatOfferDate:()=> 'Jan 1, 2099'}:{}});
+  const words=[];const walk=node=>{if(Array.isArray(node))node.forEach(walk);else if(node&&typeof node==='object')walk(node.props?.children);else if(node!=null&&node!==false)words.push(String(node));};walk(exports.default());return words.join('');
+ };
+ for(const [country,currency] of [['IN','INR'],['US','USD']]){const text=render(country);assert.match(text,new RegExp(`Face Value: ${currency} 500.00`));assert.match(text,new RegExp(`Paid: ${currency} 450.00`));assert.match(text,/Expires: Jan 1, 2099/);}
+});

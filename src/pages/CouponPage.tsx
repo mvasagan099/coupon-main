@@ -1,4 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
+import { formatCurrency } from '../lib/exchangeRate';
+import { getCountryByCode } from '../lib/countries';
+import { formatOfferDate } from '../lib/couponOffer';
 import { QRCode } from "react-qr-code";
 import { useAuth } from "../context/AuthContext";
 import { getUserOrders, supabase } from "../lib/supabase";
@@ -100,6 +103,8 @@ export default function CouponPage() {
   }
 
   const isUsed = order.coupon?.is_used;
+  const currency = getCountryByCode(order.coupon?.country_code || '')?.currency;
+  const money = (amount: number) => currency ? formatCurrency(Number(amount),currency) : `${Number(amount).toFixed(2)} (currency unavailable)`;
 
   return (
     <div style={{ maxWidth: '440px', margin: '0 auto' }} className="fade-in">
@@ -151,13 +156,14 @@ export default function CouponPage() {
                 </h2>
                 
                 <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                   {order.amount != null && (
+                   {order.coupon?.amount != null && (
                      <span style={{ fontSize: '0.8rem', color: isUsed ? 'var(--text-4)' : 'var(--text-3)', fontWeight: 600 }}>
-                       Face Value: ₹{Number(order.amount).toFixed(2)}
+                       Face Value: {money(order.coupon.amount)}
                      </span>
                    )}
+                   <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>Paid: {money(order.amount)} · Expires: {formatOfferDate(order.coupon?.expiry_date)}</span>
                    <span style={{ fontSize: '1.4rem', fontWeight: 900, color: isUsed ? 'var(--text-4)' : 'var(--cyan)' }}>
-                      Available: ₹{Number(order.coupon?.remaining_balance ?? 0).toFixed(2)}
+                      Available: {money(order.coupon?.remaining_balance ?? 0)}
                    </span>
                 </div>
 

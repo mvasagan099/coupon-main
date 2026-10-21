@@ -13,6 +13,7 @@ Built on `codex/continue-324696b`, retaining the historical application and the 
 - Stock is checked again during fulfillment. It is not reserved before payment. If terms or availability change, the full captured amount is retained in the customer's wallet, with a terminal saved result and an explicit customer message. No replacement coupon is purchased automatically.
 - Direct-checkout cancellation is serialized against settlement. A capture arriving after cancellation credits the wallet without issuing a coupon. Provider authorization/capture cannot be cancelled by this application control; the UI explains the delayed-payment outcome.
 - Saved direct orders can resume or verify without creating a second order. A failed wallet response retains its request ID so retries cannot debit twice.
+- The purchased ticket shows the coupon face value separately from the amount paid, with country currency and expiry.
 - Public-company fields are allowlisted; banking, tax, owner identity and KYC documents are excluded.
 
 ## Database
@@ -24,7 +25,7 @@ Production grants verified: customers cannot insert/update payment records, invo
 ## Validation
 
 - `npm run lint`, `npm run build`.
-- `npm run test:workflows`: 17 tests.
+- `npm run test:workflows`: 18 tests.
 - `npm run test:checkout-db`: 9 isolated PostgreSQL tests: exactly-once issuance, capture/amount/currency mismatch, sold-out/expired/disabled/changed offers, cancellation interleavings, wallet retries, public-field filtering, country/account restrictions, top-up compatibility, equivalent timestamp formats and migration reapplication. These exercise both serialized race outcomes; they do not simulate provider-network concurrency.
 - `cd server && npm run typecheck && npm test`: 15 API/security tests.
 - Production dependencies: no reported advisories from `npm audit --omit=dev`.
@@ -33,3 +34,11 @@ Production grants verified: customers cannot insert/update payment records, invo
 ## Live verification boundary
 
 Frontend/API deployment and authenticated production screen checks are recorded after deployment. No real charge, wallet debit, new redeemable coupon, recovery email or support ticket was used for verification. Provider signing-secret presence gates direct checkout; it does not prove provider-side webhook registration or actual payment delivery. A supervised sandbox end-to-end payment remains required before declaring live payment fulfillment fully verified.
+
+## Configuration and deployment verification
+
+- Initial frontend/API commit `a68ea565b98f9f09b176409ca11196cc8e8bdbda` was deployed successfully. Authenticated marketplace expiry/details navigation was verified against the live Supabase data.
+- Live checkout inspection found the frontend had no `VITE_STRIPE_PUBLISHABLE_KEY` and the API used a different Stripe sandbox. The user explicitly approved aligning the services with the New business test account `acct_1U0HjGQ822LbuEij`.
+- Matching public/test API/webhook credentials are stored in Render settings only. The existing approved-account endpoint `we_1UQjETQ822LbuEijm2L5sPqr` is reused: enabled, subscribed to `payment_intent.succeeded`, API version `2026-07-29.dahlia`, destination `/api/v1/payments/webhook/stripe`. No duplicate endpoint or new charge was created.
+- Razorpay remains gated off until its webhook signing secret is configured. Existing wallet top-up support is unchanged. Full audit has one pre-existing development-only Vite advisory; production-only dependency audit reports none.
+- Deployment configuration is managed through Render settings; adding the public key there preserves the continuation branch and does not put credentials in the Blueprint or repository. Both services retain manual deployment after deploying a specific commit.
