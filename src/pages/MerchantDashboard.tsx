@@ -1,3 +1,6 @@
+import CardBackgroundPicker from '../components/CardBackgroundPicker';
+import CouponBackgroundEditor from '../components/CouponBackgroundEditor';
+import { DEFAULT_CARD_BACKGROUND, cardBackgroundImage, normalizeCardBackground } from '../lib/cardBackgrounds';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import CountrySelector from '../components/CountrySelector';
@@ -48,7 +51,7 @@ function createInitialWizardForm() {
     value: '50',
     price: '50',
     expiryDate: getDefaultExpiryDate(),
-    bannerImage: 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60',
+    bannerImage: DEFAULT_CARD_BACKGROUND,
     terms: 'Valid at all participating locations. Cannot be exchanged for cash.',
     issueLimit: '',
     countryCode: ''
@@ -223,6 +226,8 @@ export default function MerchantDashboard() {
         throw new Error(`Limit cannot exceed your company's global maximum of ${company.coupon_limit}.`);
       }
 
+      const banner = normalizeCardBackground(wizardForm.bannerImage);
+      if (!banner) throw new Error('Choose a background design or enter a valid HTTPS image URL.');
       const newCard = await createGiftCard({
         company_id: company.id,
         country_code: wizardForm.countryCode,
@@ -231,7 +236,7 @@ export default function MerchantDashboard() {
         value: valueNum,
         price: priceNum,
         expiry_date: new Date(wizardForm.expiryDate).toISOString(),
-        banner_image: wizardForm.bannerImage,
+        banner_image: banner,
         terms: wizardForm.terms,
         issue_limit: issueLimitNum,
       });
@@ -539,13 +544,14 @@ export default function MerchantDashboard() {
             </div>
 
             {offers.length > 0 && <details className="glass-card" style={{ padding: '1rem', marginBottom: '1rem' }}>
-              <summary>Manage coupon countries ({offers.length})</summary>
+              <summary>Manage published coupons ({offers.length})</summary>
               {offers.map(offer => <div key={offer.id} style={{ marginTop: '1rem' }}>
                 <label className="label" htmlFor={`campaign-country-${offer.id}`}>{offer.title}</label>
                 <CountrySelector id={`campaign-country-${offer.id}`} value={offer.country_code} onChange={async country => {
                   try { await updateGiftCardCountry(offer.id, country.code); await fetchMerchantProfile(); success('Country saved', 'Country applies to new purchases; issued coupons keep their original country.'); }
                   catch (error) { toastError('Country update failed', getErrorMessage(error, 'Please retry.')); }
                 }} />
+                <CouponBackgroundEditor offer={offer} onSaved={image => setOffers(rows => rows.map(row => row.id === offer.id ? { ...row, banner_image: image } : row))} />
               </div>)}
             </details>}
             <form onSubmit={handleCreateCampaign} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -605,10 +611,7 @@ export default function MerchantDashboard() {
               {wizardStep === 3 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} className="fade-in">
                   <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>Banner and terms</h3>
-                  <div>
-                    <label className="label">Card banner image URL</label>
-                    <input className="input mono" value={wizardForm.bannerImage} onChange={(event) => setWizardForm({ ...wizardForm, bannerImage: event.target.value })} />
-                  </div>
+                  <CardBackgroundPicker value={wizardForm.bannerImage} onChange={image => setWizardForm({ ...wizardForm, bannerImage: image })} />
                   <div>
                     <label className="label">Terms and conditions</label>
                     <textarea className="input" style={{ minHeight: '80px', resize: 'vertical' }} value={wizardForm.terms} onChange={(event) => setWizardForm({ ...wizardForm, terms: event.target.value })} />
@@ -625,7 +628,7 @@ export default function MerchantDashboard() {
                   <div />
                 )}
                 {wizardStep < 3 ? (
-                  <button type="button" className="btn btn-primary" onClick={() => setWizardStep(wizardStep + 1)}>
+                  <button type="button" className="btn btn-primary" onClick={event => { event.preventDefault(); setWizardStep(wizardStep + 1); }}>
                     Next
                   </button>
                 ) : (
@@ -640,9 +643,9 @@ export default function MerchantDashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <span className="section-label" style={{ paddingLeft: '4px' }}>Card live preview</span>
             <div
-              className="card"
+              className="card" role="region" aria-label="Coupon card live preview"
               style={{
-                backgroundImage: `linear-gradient(135deg, rgba(3,7,18,0.92) 0%, rgba(3,7,18,0.85) 100%), url(${wizardForm.bannerImage})`,
+                backgroundImage: cardBackgroundImage(wizardForm.bannerImage, true),
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 borderRadius: '24px',
@@ -665,7 +668,6 @@ export default function MerchantDashboard() {
                     {wizardForm.title || 'Voucher title preview'}
                   </h3>
                 </div>
-                <span style={{ fontSize: '2rem' }}>CARD</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '2rem', gap: '1rem' }}>
                 <div>

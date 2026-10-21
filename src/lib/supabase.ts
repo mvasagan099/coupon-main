@@ -1,3 +1,4 @@
+import { normalizeCardBackground } from './cardBackgrounds';
 // src/lib/supabase.ts
 import { createClient, FunctionsHttpError } from "@supabase/supabase-js";
 
@@ -518,6 +519,16 @@ export async function createGiftCard(giftCardData: Omit<GiftCard, 'id' | 'create
 export async function updateGiftCardCountry(id: string, countryCode: string): Promise<void> {
   const { data, error } = await supabase.from('gift_cards').update({ country_code: countryCode }).eq('id', id).select('id').single();
   if (error || !data) throw error ?? new Error('Coupon country was not saved.');
+}
+
+export async function updateGiftCardBanner(id: string, companyId: string, previousImage: string | null, image: string): Promise<void> {
+  const banner = normalizeCardBackground(image);
+  if (!banner) throw new Error('Choose a preset or a valid HTTPS image URL.');
+  if (!isSupabaseConfigured) throw new Error('Coupon database is not configured.');
+  let query = supabase.from('gift_cards').update({ banner_image: banner }).eq('id', id).eq('company_id', companyId);
+  query = previousImage == null ? query.is('banner_image', null) : query.eq('banner_image', previousImage);
+  const { data, error } = await query.select('id').single();
+  if (error || !data) throw new Error('Background was not saved. The coupon may have changed or your merchant access may have expired. Reload before retrying.');
 }
 
 export async function deleteGiftCard(id: string): Promise<void> {

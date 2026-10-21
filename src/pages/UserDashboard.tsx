@@ -1,3 +1,4 @@
+import { normalizeCardBackground, DEFAULT_CARD_BACKGROUND } from '../lib/cardBackgrounds';
 import { voucherState } from '../lib/voucherState';
 import { useNow } from '../hooks/useNow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -831,7 +832,7 @@ export default function UserDashboard() {
                           style={{
                             position: 'absolute',
                             inset: 0,
-                            background: `url(${(!card.banner_image || card.banner_image.includes('localhost') || card.banner_image.includes('127.0.0.1')) ? 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=900&auto=format&fit=crop&q=60' : card.banner_image}) center/cover`,
+                            background: `url(${JSON.stringify(normalizeCardBackground(card.banner_image) ?? DEFAULT_CARD_BACKGROUND)}) center/cover`,
                             zIndex: 0
                           }}
                         />

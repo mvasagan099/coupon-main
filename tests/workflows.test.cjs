@@ -134,3 +134,40 @@ test('multiple merchant companies select one deterministic company instead of fa
     supabase: { rpc: () => q }, withTimeout: async p => await p })('owner');
   assert.equal(limit, 1); assert.equal(company.id, 'approved-company');
 });
+function backgrounds() { return compile(fs.readFileSync(path.join(root, 'src/lib/cardBackgrounds.ts'), 'utf8'), { URL }); }
+test('15 background presets are bundled and image URLs reject unsafe schemes and unknown local paths', () => {
+  const { CARD_BACKGROUNDS, normalizeCardBackground, cardBackgroundImage } = backgrounds();
+  assert.equal(CARD_BACKGROUNDS.length, 15); assert.equal(new Set(CARD_BACKGROUNDS.map(item => item.slug)).size, 15);
+  for (const preset of CARD_BACKGROUNDS) {
+    assert.equal(normalizeCardBackground(preset.image), preset.image);
+    const svg = fs.readFileSync(path.join(root, 'public', preset.image), 'utf8');
+    assert.match(svg, /viewBox="0 0 1200 600"/); assert.doesNotMatch(svg, /<script|<foreignObject|javascript:|onload=|https?:\/\/(?!www.w3.org)/i);
+  }
+  for (const value of ['javascript:alert(1)', 'data:image/svg+xml,test', 'http://example.com/a.jpg', '/unknown.svg', '//example.com/a.jpg', 'https://user:pass@example.com/a.jpg', 'https://localhost/image.jpg', '', null, undefined]) assert.equal(normalizeCardBackground(value), null);
+  assert.equal(normalizeCardBackground(' https://example.com/card.jpg '), 'https://example.com/card.jpg');
+  assert.ok(cardBackgroundImage('/card-backgrounds/amazon.svg').includes('url("/card-backgrounds/amazon.svg")'));
+});
+test('background updates write only the banner, scope the merchant and reject stale or denied saves', async () => {
+  const writes = [], filters = []; let result = { data: { id: 'offer' }, error: null };
+  const q = { update: fields => { writes.push(fields); return q; }, eq: (...args) => { filters.push(args); return q; }, is: (...args) => { filters.push(args); return q; }, select: () => q, single: async () => result };
+  const update = helper('updateGiftCardBanner', { isSupabaseConfigured: true, normalizeCardBackground: backgrounds().normalizeCardBackground, supabase: { from: table => { assert.equal(table, 'gift_cards'); return q; } } });
+  await update('offer','merchant','https://example.com/old.jpg','/card-backgrounds/amazon.svg');
+  assert.deepEqual(Object.keys(writes[0]), ['banner_image']); assert.equal(writes[0].banner_image, '/card-backgrounds/amazon.svg');
+  assert.ok(filters.some(args => args[0] === 'company_id' && args[1] === 'merchant')); assert.ok(filters.some(args => args[0] === 'banner_image' && args[1] === 'https://example.com/old.jpg'));
+  result = { data: null, error: null }; await assert.rejects(update('offer','merchant',null,'/card-backgrounds/amazon.svg'), /not saved/);
+  const before = writes.length; await assert.rejects(update('offer','merchant',null,'javascript:alert(1)'), /valid HTTPS/); assert.equal(writes.length, before);
+});
+test('background picker uses non-submitting buttons and exposes every brand choice', () => {
+  const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+  const Picker = compile(fs.readFileSync(path.join(root, 'src/components/CardBackgroundPicker.tsx'), 'utf8'), { require: name => name.includes('cardBackgrounds') ? backgrounds() : name.endsWith('.css') ? {} : require(name) }).default;
+  const html = renderToStaticMarkup(React.createElement(Picker, { value:'/card-backgrounds/amazon.svg',onChange() {} }));
+  assert.equal((html.match(/aria-label="Use .*? background"/g)||[]).length, 15); assert.equal((html.match(/type="button"/g)||[]).length, 16); assert.equal(html.includes('type="submit"'), false); assert.match(html,/aria-pressed="true"/);
+});
+test('Next cancels default submission before switching to the final campaign step', () => {
+  const file = 'src/pages/MerchantDashboard.tsx', source = fs.readFileSync(path.join(root, file), 'utf8');
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let button; function visit(node) { if (ts.isJsxElement(node) && node.openingElement.tagName.getText(tree) === 'button' && node.openingElement.getText(tree).includes('setWizardStep(wizardStep + 1)')) button = node; ts.forEachChild(node, visit); } visit(tree);
+  let step = 2, prevented = false;
+  const control = compile('export function next(){return (' + button.getText(tree) + ')}', { require, wizardStep: step, setWizardStep: value => { step = value; } }).next();
+  control.props.onClick({ preventDefault() { prevented = true; } }); assert.equal(prevented, true); assert.equal(step, 3); assert.equal(control.props.type, 'button');
+});

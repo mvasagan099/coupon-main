@@ -1,0 +1,13 @@
+.card-background-picker { min-width: 0; border: 0; padding: 0; margin: 0; }
+.background-help { color: var(--text-3); font-size: .8rem; line-height: 1.6; margin: .6rem 0; }
+.background-preset-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .6rem; margin: .8rem 0; }
+.background-preset { padding: 0; overflow: hidden; border-radius: 12px; border: 2px solid var(--border); background: var(--surface-soft); color: var(--text-1); text-align: left; }
+.background-preset img { display: block; width: 100%; height: auto; aspect-ratio: 2; object-fit: cover; }
+.background-preset span { display: block; padding: .5rem; font-size: .75rem; font-weight: 650; }
+.background-preset[aria-pressed="true"] { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan); }
+.background-preset:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+.card-background-picker:disabled { opacity: .65; }
+.coupon-background-editor { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--border); }
+.coupon-background-editor summary { cursor: pointer; font-weight: 650; margin-bottom: .8rem; }
+.saved-background-preview { margin: 1rem 0; min-height: 150px; padding: 1rem; border-radius: 16px; color: #fff; background-size: cover; background-position: center; }
+@media (max-width: 500px) { .background-preset-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
