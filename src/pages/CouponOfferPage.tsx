@@ -88,14 +88,6 @@ function CouponOffer({ id }: { id: string }) {
         setLoading(false);
         return;
       }
-      const dest = offer.coupon?.redemption_destination?.toLowerCase().trim();
-      const comp = offer.company?.name?.toLowerCase().trim() || '';
-      const title = offer.coupon?.title?.toLowerCase().trim() || '';
-      if (dest === 'gaming' || dest === 'lottery' || comp.includes('gaming') || comp.includes('lottery') || title.includes('gaming') || title.includes('lottery')) {
-        setLoadError('This coupon is exclusive to dedicated applications and is not listed in the public marketplace.');
-        setLoading(false);
-        return;
-      }
       setDetails(offer); setBalance(Number(profile.wallet_balance)); setLoading(false);
     }).catch(error => { if (active) { setLoadError(errorMessage(error)); setLoading(false); } });
 
