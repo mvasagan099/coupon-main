@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Crimson Pulse coupon card background</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d0407"/>
+      <stop offset="50%" stop-color="#2a0813"/>
+      <stop offset="100%" stop-color="#0a0205"/>
+    </linearGradient>
+    <linearGradient id="crimson" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fda4af"/>
+      <stop offset="40%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#881337"/>
+    </linearGradient>
+    <radialGradient id="rubyGlow" cx="80%" cy="50%" r="48%">
+      <stop offset="0%" stop-color="#fb7185" stop-opacity="0.4"/>
+      <stop offset="60%" stop-color="#be123c" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <circle cx="950" cy="300" r="300" fill="url(#rubyGlow)"/>
+  <path d="M0 600 L300 0 L400 0 L100 600 Z" fill="#e11d48" fill-opacity="0.04"/>
+  <path d="M150 600 L450 0 L550 0 L250 600 Z" fill="#fb7185" fill-opacity="0.03"/>
+  <path d="M0 480 Q450 260 850 480 T1200 320" fill="none" stroke="#fb7185" stroke-width="2.5" stroke-opacity="0.35"/>
+  <circle cx="950" cy="300" r="140" fill="none" stroke="#f43f5e" stroke-width="2" stroke-opacity="0.5"/>
+  <circle cx="950" cy="300" r="110" fill="none" stroke="#fda4af" stroke-width="1.5" stroke-opacity="0.3" stroke-dasharray="8 6"/>
+  <rect x="885" y="235" width="130" height="130" rx="36" fill="url(#crimson)"/>
+  <circle cx="950" cy="300" r="30" fill="#1c050c"/>
+  <circle cx="950" cy="300" r="12" fill="#ffe4e6"/>
+</svg>

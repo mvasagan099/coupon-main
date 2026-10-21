@@ -135,9 +135,9 @@ test('multiple merchant companies select one deterministic company instead of fa
   assert.equal(limit, 1); assert.equal(company.id, 'approved-company');
 });
 function backgrounds() { return compile(fs.readFileSync(path.join(root, 'src/lib/cardBackgrounds.ts'), 'utf8'), { URL }); }
-test('15 background presets are bundled and image URLs reject unsafe schemes and unknown local paths', () => {
+test('25 background presets are bundled and image URLs reject unsafe schemes and unknown local paths', () => {
   const { CARD_BACKGROUNDS, normalizeCardBackground, cardBackgroundImage } = backgrounds();
-  assert.equal(CARD_BACKGROUNDS.length, 15); assert.equal(new Set(CARD_BACKGROUNDS.map(item => item.slug)).size, 15);
+  assert.equal(CARD_BACKGROUNDS.length, 25); assert.equal(new Set(CARD_BACKGROUNDS.map(item => item.slug)).size, 25);
   for (const preset of CARD_BACKGROUNDS) {
     assert.equal(normalizeCardBackground(preset.image), preset.image);
     const svg = fs.readFileSync(path.join(root, 'public', preset.image), 'utf8');
@@ -161,7 +161,7 @@ test('background picker uses non-submitting buttons and exposes every brand choi
   const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
   const Picker = compile(fs.readFileSync(path.join(root, 'src/components/CardBackgroundPicker.tsx'), 'utf8'), { require: name => name.includes('cardBackgrounds') ? backgrounds() : name.endsWith('.css') ? {} : require(name) }).default;
   const html = renderToStaticMarkup(React.createElement(Picker, { value:'/card-backgrounds/amazon.svg',onChange() {} }));
-  assert.equal((html.match(/aria-label="Use .*? background"/g)||[]).length, 15); assert.equal((html.match(/type="button"/g)||[]).length, 16); assert.equal(html.includes('type="submit"'), false); assert.match(html,/aria-pressed="true"/);
+  assert.equal((html.match(/aria-label="Use .*? background"/g)||[]).length, 25); assert.equal((html.match(/type="button"/g)||[]).length, 26); assert.equal(html.includes('type="submit"'), false); assert.match(html,/aria-pressed="true"/);
 });
 test('Next cancels default submission before switching to the final campaign step', () => {
   const file = 'src/pages/MerchantDashboard.tsx', source = fs.readFileSync(path.join(root, file), 'utf8');

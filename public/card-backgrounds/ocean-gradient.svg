@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Ocean Gradient coupon card background</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#030712"/>
+      <stop offset="45%" stop-color="#0c2340"/>
+      <stop offset="80%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#082f49"/>
+    </linearGradient>
+    <linearGradient id="wave1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.25"/>
+      <stop offset="50%" stop-color="#0284c7" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#0369a1" stop-opacity="0.1"/>
+    </linearGradient>
+    <radialGradient id="waterGlow" cx="80%" cy="50%" r="45%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4"/>
+      <stop offset="50%" stop-color="#0284c7" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <circle cx="950" cy="300" r="300" fill="url(#waterGlow)"/>
+  <path d="M0 420 C300 360 450 500 800 440 C1000 400 1100 450 1200 410 L1200 600 L0 600 Z" fill="url(#wave1)"/>
+  <path d="M0 480 C350 420 550 560 900 500 C1050 470 1150 520 1200 490 L1200 600 L0 600 Z" fill="#0284c7" fill-opacity="0.3"/>
+  <path d="M0 350 C320 280 500 420 850 360 C1020 330 1120 390 1200 350" fill="none" stroke="#7dd3fc" stroke-width="2.5" stroke-opacity="0.4"/>
+  <circle cx="950" cy="300" r="130" fill="none" stroke="#38bdf8" stroke-width="2.5" stroke-opacity="0.5"/>
+  <circle cx="950" cy="300" r="95" fill="none" stroke="#bae6fd" stroke-width="1.5" stroke-opacity="0.4" stroke-dasharray="10 8"/>
+  <rect x="885" y="235" width="130" height="130" rx="34" fill="#0284c7" fill-opacity="0.85"/>
+  <path d="M915 315 C930 285 970 285 985 315" fill="none" stroke="#f0f9ff" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="950" cy="275" r="10" fill="#f0f9ff"/>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Golden Prestige coupon card background</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a0d"/>
+      <stop offset="45%" stop-color="#16141a"/>
+      <stop offset="100%" stop-color="#070608"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="25%" stop-color="#d97706"/>
+      <stop offset="50%" stop-color="#fbbf24"/>
+      <stop offset="75%" stop-color="#b45309"/>
+      <stop offset="100%" stop-color="#fde68a"/>
+    </linearGradient>
+    <radialGradient id="goldGlow" cx="80%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.3"/>
+      <stop offset="60%" stop-color="#d97706" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <circle cx="950" cy="300" r="300" fill="url(#goldGlow)"/>
+  <path d="M0 600 L450 0 L550 0 L100 600 Z" fill="#d97706" fill-opacity="0.04"/>
+  <path d="M200 600 L650 0 L750 0 L300 600 Z" fill="#fbbf24" fill-opacity="0.05"/>
+  <path d="M0 520 Q500 320 950 480 T1200 360" fill="none" stroke="url(#gold)" stroke-width="2" stroke-opacity="0.35"/>
+  <path d="M0 460 Q450 260 900 420 T1200 300" fill="none" stroke="url(#gold)" stroke-width="1.5" stroke-opacity="0.25"/>
+  <circle cx="950" cy="300" r="130" fill="none" stroke="url(#gold)" stroke-width="2.5" stroke-opacity="0.6"/>
+  <circle cx="950" cy="300" r="110" fill="none" stroke="url(#gold)" stroke-width="1.5" stroke-opacity="0.4" stroke-dasharray="6 6"/>
+  <rect x="885" y="235" width="130" height="130" rx="28" transform="rotate(45 950 300)" fill="url(#gold)"/>
+  <polygon points="950,250 964,286 1000,300 964,314 950,350 936,314 900,300 936,286" fill="#18181b"/>
+  <circle cx="950" cy="300" r="10" fill="#fef08a"/>
+</svg>

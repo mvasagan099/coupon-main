@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Sunset Horizon coupon card background</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#180b2b"/>
+      <stop offset="40%" stop-color="#3b0764"/>
+      <stop offset="75%" stop-color="#9f1239"/>
+      <stop offset="100%" stop-color="#431407"/>
+    </linearGradient>
+    <linearGradient id="sunGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="60%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#be123c"/>
+    </linearGradient>
+    <radialGradient id="sunGlow" cx="80%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.5"/>
+      <stop offset="50%" stop-color="#f43f5e" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <circle cx="950" cy="300" r="320" fill="url(#sunGlow)"/>
+  <path d="M0 450 Q300 350 700 480 T1200 380 L1200 600 L0 600 Z" fill="#be123c" fill-opacity="0.35"/>
+  <path d="M0 520 Q400 420 850 540 T1200 470 L1200 600 L0 600 Z" fill="#881337" fill-opacity="0.55"/>
+  <circle cx="950" cy="300" r="140" fill="none" stroke="#fb923c" stroke-width="2" stroke-opacity="0.5"/>
+  <circle cx="950" cy="300" r="115" fill="none" stroke="#fde047" stroke-width="1.5" stroke-opacity="0.4" stroke-dasharray="8 6"/>
+  <circle cx="950" cy="300" r="75" fill="url(#sunGrad)"/>
+  <path d="M910 300 L990 300" stroke="#fdf4ff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M920 315 L980 315" stroke="#fdf4ff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M935 330 L965 330" stroke="#fdf4ff" stroke-width="3" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Aurora Glow coupon card background</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070c18"/>
+      <stop offset="45%" stop-color="#0b2436"/>
+      <stop offset="80%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#04121a"/>
+    </linearGradient>
+    <linearGradient id="aurora1" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#10b981" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="aurora2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#06b6d4" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="80%" cy="50%" r="45%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.45"/>
+      <stop offset="50%" stop-color="#06b6d4" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <circle cx="950" cy="300" r="320" fill="url(#glow)"/>
+  <path d="M0 450 Q300 200 650 380 T1200 220 L1200 600 L0 600 Z" fill="url(#aurora1)"/>
+  <path d="M0 320 Q400 520 800 250 T1200 400 L1200 600 L0 600 Z" fill="url(#aurora2)"/>
+  <path d="M0 260 Q350 120 700 290 T1200 180" fill="none" stroke="#67e8f9" stroke-width="2.5" stroke-opacity="0.4"/>
+  <path d="M0 380 Q450 240 850 410 T1200 300" fill="none" stroke="#a7f3d0" stroke-width="1.8" stroke-opacity="0.35"/>
+  <circle cx="950" cy="300" r="140" fill="none" stroke="#34d399" stroke-width="2" stroke-opacity="0.35"/>
+  <circle cx="950" cy="300" r="100" fill="none" stroke="#67e8f9" stroke-width="1.5" stroke-opacity="0.4" stroke-dasharray="8 6"/>
+  <polygon points="950,230 968,282 1020,300 968,318 950,370 932,318 880,300 932,282" fill="#ecfdf5" fill-opacity="0.85"/>
+  <circle cx="250" cy="120" r="2.5" fill="#fff" fill-opacity="0.7"/>
+  <circle cx="480" cy="90" r="3" fill="#fff" fill-opacity="0.8"/>
+  <circle cx="720" cy="140" r="2" fill="#fff" fill-opacity="0.6"/>
+  <circle cx="1120" cy="180" r="3" fill="#fff" fill-opacity="0.75"/>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Cyber Matrix coupon card background</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="60%" stop-color="#05192d"/>
+      <stop offset="100%" stop-color="#000d1a"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe"/>
+      <stop offset="100%" stop-color="#4facfe"/>
+    </linearGradient>
+    <radialGradient id="cyberGlow" cx="80%" cy="50%" r="45%">
+      <stop offset="0%" stop-color="#00f2fe" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#0284c7" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#0284c7" stroke-width="0.75" stroke-opacity="0.18"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <rect width="1200" height="600" fill="url(#grid)"/>
+  <circle cx="950" cy="300" r="300" fill="url(#cyberGlow)"/>
+  <path d="M0 450 L350 450 L450 350 L800 350 L900 450 L1200 450" fill="none" stroke="#00f2fe" stroke-width="2" stroke-opacity="0.4"/>
+  <circle cx="450" cy="350" r="5" fill="#00f2fe"/>
+  <circle cx="800" cy="350" r="5" fill="#00f2fe"/>
+  <circle cx="950" cy="300" r="140" fill="none" stroke="#00f2fe" stroke-width="2" stroke-opacity="0.5"/>
+  <circle cx="950" cy="300" r="110" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-opacity="0.3" stroke-dasharray="14 10"/>
+  <polygon points="950,235 1010,270 1010,330 950,365 890,330 890,270" fill="url(#neon)" fill-opacity="0.9"/>
+  <polygon points="950,250 995,275 995,325 950,350 905,325 905,275" fill="#020617"/>
+  <polygon points="950,275 975,290 975,310 950,325 925,310 925,290" fill="url(#neon)"/>
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Minimalist Slate coupon card background</title>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f17"/>
+      <stop offset="50%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="50%" stop-color="#94a3b8"/>
+      <stop offset="100%" stop-color="#475569"/>
+    </linearGradient>
+    <radialGradient id="slateGlow" cx="80%" cy="50%" r="48%">
+      <stop offset="0%" stop-color="#94a3b8" stop-opacity="0.3"/>
+      <stop offset="60%" stop-color="#475569" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <circle cx="950" cy="300" r="300" fill="url(#slateGlow)"/>
+  <circle cx="950" cy="300" r="220" fill="none" stroke="#64748b" stroke-width="1" stroke-opacity="0.15"/>
+  <circle cx="950" cy="300" r="170" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-opacity="0.25"/>
+  <circle cx="950" cy="300" r="130" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-opacity="0.45"/>
+  <path d="M0 450 Q450 320 850 480 T1200 360" fill="none" stroke="#94a3b8" stroke-width="2" stroke-opacity="0.25"/>
+  <rect x="885" y="235" width="130" height="130" rx="30" fill="url(#metal)"/>
+  <circle cx="950" cy="300" r="36" fill="#0f172a"/>
+  <circle cx="950" cy="300" r="16" fill="#f8fafc"/>
+</svg>
