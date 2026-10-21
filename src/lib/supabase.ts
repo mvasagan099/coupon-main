@@ -903,19 +903,22 @@ export async function validateCoupon(code: string): Promise<CouponValidation> {
 }
 
 export async function validateCouponById(id: string): Promise<CouponValidation> {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
   try {
-    const { data, error } = await supabase.rpc("validate_coupon_by_id", {
-      p_coupon_id: id,
-    });
+    const { data, error } = isUuid
+      ? await supabase.rpc("validate_coupon_by_id", { p_coupon_id: id.trim() })
+      : await supabase.rpc("validate_coupon", { p_code: id.trim().toUpperCase() });
     if (error) throw error;
-    if (!data || data.length === 0) throw new Error("Invalid coupon link");
+    if (!data || data.length === 0) throw new Error(isUuid ? "Invalid coupon link" : "Invalid coupon code");
     return data[0] as CouponValidation;
   } catch (err: any) {
     if (isSupabaseConfigured) throw err;
     console.warn("[CouponVault] validateCouponById failed, falling back to LocalStorage:", err.message);
     const coupons = getLocal<Coupon[]>("cv_coupons", []);
     const companies = getLocal<Company[]>("cv_companies", []);
-    const cp = coupons.find(c => c.id === id);
+    const cp = isUuid
+      ? coupons.find(c => c.id === id.trim())
+      : coupons.find(c => c.code.toUpperCase() === id.trim().toUpperCase());
     if (!cp) throw new Error("Invalid coupon link");
     
     const co = companies.find(comp => comp.id === cp.company_id);
@@ -981,11 +984,12 @@ export async function markCouponUsedById(id: string): Promise<string> {
     throw new Error('This coupon has no assigned redemption destination and cannot be redeemed.');
   }
   if (!coupon.remaining_balance || coupon.remaining_balance <= 0) throw new Error('No coupon balance remains.');
+  const resolvedCouponId = coupon.coupon_id;
   try {
     const reqId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : '00000000-0000-0000-0000-' + Date.now().toString().slice(-12);
-    await redeemCouponCv(id, reqId);
+    await redeemCouponCv(resolvedCouponId, reqId);
   } catch {
-    await redeemCouponAmount(id, coupon.remaining_balance);
+    await redeemCouponAmount(resolvedCouponId, coupon.remaining_balance);
   }
   return coupon.coupon_code;
 }

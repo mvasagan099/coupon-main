@@ -254,9 +254,10 @@ BEGIN
   SELECT * INTO c FROM public.coupons WHERE id=p_coupon_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Coupon not found'; END IF;
 
-  -- 1. Coupon must be owned by the authenticated user.
-  IF c.issued_to IS DISTINCT FROM auth.uid() THEN
-    RAISE EXCEPTION 'This coupon does not belong to your account';
+  -- 1. Authorization: user must be coupon recipient, owning merchant, or platform admin.
+  IF (c.issued_to IS DISTINCT FROM auth.uid() AND NOT public.is_admin() AND NOT EXISTS (
+    SELECT 1 FROM public.companies co WHERE co.id = c.company_id AND co.owner_id = auth.uid() AND co.status = 'approved')) THEN
+    RAISE EXCEPTION 'Coupon not found or unauthorized';
   END IF;
 
   -- 2. Destination restriction: unclassified coupons are blocked.
@@ -328,8 +329,8 @@ BEGIN
   WHERE c.id = p_coupon_id;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.validate_coupon_by_id(uuid) FROM PUBLIC,anon;
-GRANT EXECUTE ON FUNCTION public.validate_coupon_by_id(uuid) TO authenticated,service_role;
+REVOKE ALL ON FUNCTION public.validate_coupon_by_id(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_coupon_by_id(uuid) TO authenticated,service_role,anon;
 
 CREATE OR REPLACE FUNCTION public.validate_coupon(p_code text)
 RETURNS TABLE (
@@ -366,8 +367,8 @@ BEGIN
   END IF;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.validate_coupon(text) FROM PUBLIC,anon;
-GRANT EXECUTE ON FUNCTION public.validate_coupon(text) TO authenticated,service_role;
+REVOKE ALL ON FUNCTION public.validate_coupon(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_coupon(text) TO authenticated,service_role,anon;
 
 -- 9b. Update get_gift_cards_with_counts to return redemption_destination
 CREATE OR REPLACE FUNCTION public.get_gift_cards_with_counts()

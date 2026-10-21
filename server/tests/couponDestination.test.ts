@@ -102,6 +102,18 @@ test('application authentication rejects missing, malformed or forged credential
   assert.equal(r6.statusCode, 200);
   assert.equal(r6.nextCalled, true);
   assert.equal(r6.callingApp, 'lottery');
+
+  // Fallback API_KEY authentication
+  process.env.API_KEY = 'fallback-api-key-master-32charslong';
+  const r7 = await callAuth({ authorization: 'Bearer fallback-api-key-master-32charslong' }, { gameId: 'gaming-hub' });
+  assert.equal(r7.statusCode, 200);
+  assert.equal(r7.nextCalled, true);
+  assert.equal(r7.callingApp, 'gaming');
+
+  const r8 = await callAuth({ authorization: 'Bearer fallback-api-key-master-32charslong' }, { gameId: 'lottery-platform' });
+  assert.equal(r8.statusCode, 200);
+  assert.equal(r8.nextCalled, true);
+  assert.equal(r8.callingApp, 'lottery');
 });
 
 // ------------------------------------------------------------

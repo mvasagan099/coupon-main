@@ -43,9 +43,13 @@ export function applicationAuthentication(options: ApplicationAuthOptions = {}):
       callingApp = 'gaming';
     } else if (lotteryKey && checkMatch(lotteryKey)) {
       callingApp = 'lottery';
-    } else if (!gamingKey && !lotteryKey && fallbackKey && checkMatch(fallbackKey)) {
-      // If separate keys are not yet configured in env, fallback to 'gaming' for backward compatibility
-      callingApp = 'gaming';
+    } else if (fallbackKey && checkMatch(fallbackKey)) {
+      // If caller provides API_KEY (fallback/shared key), determine destination application
+      // from gameId or request header, defaulting to 'gaming' for backward compatibility.
+      const requestedApp = (req.body?.gameId === 'lottery-platform' || req.body?.gameId === 'lottery' || req.headers['x-calling-app'] === 'lottery')
+        ? 'lottery'
+        : 'gaming';
+      callingApp = requestedApp;
     }
 
     if (!callingApp) {

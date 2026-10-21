@@ -1,14 +1,16 @@
 import { useNow } from '../hooks/useNow';
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import type { CouponValidation } from '../lib/supabase';
 import { markCouponUsedById, validateCouponById } from '../lib/supabase';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../context/AuthContext';
 
 export default function ScanPage() {
   const now = useNow();
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { success, error: toastError } = useToast();
   const [data, setData] = useState<CouponValidation | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,6 +36,10 @@ export default function ScanPage() {
 
   async function handleMarkUsed() {
     if (!code) return;
+    if (!user) {
+      toastError('Sign-in required', 'Please sign in as the voucher owner or an authorized merchant to redeem this voucher.');
+      return;
+    }
     setMarking(true);
 
     try {
@@ -44,8 +50,16 @@ export default function ScanPage() {
       setMarked(true);
       success('Voucher redeemed', 'The coupon has been marked as used successfully.');
     } catch (err: any) {
-      setError(err.message);
-      toastError('Redemption failed', err.message);
+      let friendlyMsg = err.message || 'Redemption failed';
+      if (
+        friendlyMsg.toLowerCase().includes('unauthorized') ||
+        friendlyMsg.toLowerCase().includes('not found or unauthorized') ||
+        friendlyMsg.toLowerCase().includes('not belong to your account')
+      ) {
+        friendlyMsg = `Redemption unauthorized: Only the recipient of this coupon, an authorized merchant from ${data?.company_name || 'the issuing company'}, or an administrator can redeem it. (Currently signed in as ${user.email})`;
+      }
+      setError(friendlyMsg);
+      toastError('Redemption failed', friendlyMsg);
     } finally {
       setMarking(false);
     }
@@ -177,23 +191,45 @@ export default function ScanPage() {
                 </div>
               </div>
 
-              <button
-                className={`btn ${isUsed ? 'btn-secondary' : 'btn-primary'}`}
-                onClick={handleMarkUsed}
-                disabled={!isActive || marking || marked}
-                style={{ width: '100%' }}
-              >
-                {marking ? (
-                  <>
-                    <span className="spinner" />
-                    Processing redemption...
-                  </>
-                ) : isUsed || marked ? (
-                  'Redemption already recorded'
-                ) : (
-                  isActive ? 'Redeem voucher' : statusLabel
-                )}
-              </button>
+              {isActive && !user ? (
+                <div style={{ textAlign: 'center', background: 'var(--surface-soft, rgba(0,0,0,0.03))', padding: '1.25rem', borderRadius: '16px', border: '1px solid var(--border)' }}>
+                  <p style={{ margin: '0 0 0.85rem', fontSize: '0.9rem', color: 'var(--text-2)', lineHeight: 1.5 }}>
+                    Sign in with the coupon recipient's account or merchant credentials for <strong>{data.company_name}</strong> to redeem this voucher.
+                  </p>
+                  <Link
+                    className="btn btn-primary"
+                    to={`/login?returnPath=/coupon/${encodeURIComponent(code || '')}`}
+                    style={{ width: '100%', display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }}
+                  >
+                    Sign in to redeem voucher
+                  </Link>
+                </div>
+              ) : (
+                <>
+                  <button
+                    className={`btn ${isUsed ? 'btn-secondary' : 'btn-primary'}`}
+                    onClick={handleMarkUsed}
+                    disabled={!isActive || marking || marked}
+                    style={{ width: '100%' }}
+                  >
+                    {marking ? (
+                      <>
+                        <span className="spinner" />
+                        Processing redemption...
+                      </>
+                    ) : isUsed || marked ? (
+                      'Redemption already recorded'
+                    ) : (
+                      isActive ? 'Redeem voucher' : statusLabel
+                    )}
+                  </button>
+                  {user && isActive && (
+                    <div style={{ textAlign: 'center', fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                      Signed in as: <span className="mono" style={{ color: 'var(--text-2)' }}>{user.email}</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         ) : null}
