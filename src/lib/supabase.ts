@@ -42,6 +42,8 @@ async function withTimeout<T>(promise: PromiseLike<T>, ms = 15000): Promise<T> {
 
 // ---- Interfaces --------------------------------------------------
 
+export type RedemptionDestination = 'gaming' | 'lottery' | 'couponvault';
+
 export interface Company {
   id: string;
   name: string;
@@ -58,6 +60,7 @@ export interface Company {
   document_url?: string;
   owner_id?: string;
   logo_url?: string;
+  redemption_destination?: RedemptionDestination | null;
 }
 
 export interface Withdrawal {
@@ -98,6 +101,7 @@ export interface GiftCard {
   created_at: string;
   issued_count?: number;
   is_active?: boolean;
+  redemption_destination?: RedemptionDestination | null;
 }
 
 export interface Coupon {
@@ -125,6 +129,7 @@ export interface Coupon {
   redeemed_at?: string;
   country_code?: string;
   amount?: number;
+  redemption_destination?: RedemptionDestination | null;
 }
 
 export interface RedemptionTransaction {
@@ -160,6 +165,7 @@ export interface CouponValidation {
   expiry_date: string;
   status: string;
   coupon_id: string;
+  redemption_destination?: RedemptionDestination | null;
 }
 
 export interface AdminUser {
@@ -406,6 +412,38 @@ export async function adminRejectCompany(id: string): Promise<Company> {
       .single();
     if (error) throw error;
     return getCompany(data.id);
+}
+
+export async function adminSetCompanyDestination(
+  companyId: string,
+  destination: RedemptionDestination | null
+): Promise<Company> {
+  try {
+    const { data, error } = await supabase.rpc('admin_set_company_destination', {
+      p_company_id: companyId,
+      p_destination: destination,
+    });
+    if (error) {
+      // Direct update fallback if RPC has not been executed yet
+      const { data: directData, error: directError } = await supabase
+        .from('companies')
+        .update({ redemption_destination: destination })
+        .eq('id', companyId)
+        .select('id')
+        .single();
+      if (directError) throw directError;
+      return getCompany(directData.id);
+    }
+    return (data as any) ?? getCompany(companyId);
+  } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
+    const companies = getLocal<Company[]>('cv_companies', []);
+    const idx = companies.findIndex((c) => c.id === companyId);
+    if (idx === -1) throw new Error('Company not found');
+    companies[idx].redemption_destination = destination;
+    setLocal('cv_companies', companies);
+    return companies[idx];
+  }
 }
 
 export async function getCompanyStats(): Promise<CompanyStats[]> {
@@ -765,6 +803,7 @@ export async function getUserGiftCards(userId: string): Promise<Coupon[]> {
       card_value: d.gift_cards?.value,
       card_price: d.gift_cards?.price,
       card_terms: d.gift_cards?.terms,
+      redemption_destination: d.redemption_destination ?? d.gift_cards?.redemption_destination ?? null,
     }));
 
     return dbCoupons;
@@ -791,6 +830,7 @@ export async function getUserGiftCards(userId: string): Promise<Coupon[]> {
         card_value: gc?.value,
         card_price: gc?.price,
         card_terms: gc?.terms,
+        redemption_destination: c.redemption_destination ?? gc?.redemption_destination ?? null,
       };
     });
   }
@@ -855,7 +895,8 @@ export async function validateCoupon(code: string): Promise<CouponValidation> {
       issued_at: cp.created_at,
       remaining_balance: cp.remaining_balance,
       expiry_date: cp.expiry_date,
-      status: cp.status
+      status: cp.status,
+      redemption_destination: cp.redemption_destination ?? null
     };
   }
 }
@@ -885,8 +926,42 @@ export async function validateCouponById(id: string): Promise<CouponValidation> 
       issued_at: cp.created_at,
       remaining_balance: cp.remaining_balance,
       expiry_date: cp.expiry_date,
-      status: cp.status
+      status: cp.status,
+      redemption_destination: cp.redemption_destination ?? null
     };
+  }
+}
+
+export async function redeemCouponCv(
+  couponId: string,
+  requestId: string
+): Promise<{ idempotent: boolean; remaining_balance: number; redeemed_amount?: number }> {
+  try {
+    const { data, error } = await withTimeout(
+      supabase.rpc('redeem_coupon_cv', {
+        p_coupon_id: couponId,
+        p_request_id: requestId,
+      })
+    );
+    if (error) throw error;
+    return data;
+  } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
+    // Local fallback
+    const coupons = getLocal<Coupon[]>("cv_coupons", []);
+    const idx = coupons.findIndex(c => c.id === couponId);
+    if (idx === -1) throw new Error("Coupon not found");
+    const cp = coupons[idx];
+    if (cp.redemption_destination !== 'couponvault') {
+      throw new Error(`Coupon destination mismatch: this coupon is for '${cp.redemption_destination ?? 'unclassified'}' and cannot be redeemed in CouponVault.`);
+    }
+    if (cp.is_used || cp.status === 'redeemed') throw new Error("Coupon is already redeemed");
+    cp.is_used = true;
+    cp.status = 'redeemed';
+    const amount = cp.remaining_balance;
+    cp.remaining_balance = 0;
+    setLocal("cv_coupons", coupons);
+    return { idempotent: false, remaining_balance: 0, redeemed_amount: amount };
   }
 }
 
@@ -898,8 +973,19 @@ export async function redeemCouponAmount(couponId: string, amount: number, _opti
 }
 export async function markCouponUsedById(id: string): Promise<string> {
   const coupon = await validateCouponById(id);
+  if (coupon.redemption_destination && coupon.redemption_destination !== 'couponvault') {
+    throw new Error(`This coupon is restricted to ${coupon.redemption_destination} and cannot be redeemed in CouponVault.`);
+  }
+  if (!coupon.redemption_destination) {
+    throw new Error('This coupon has no assigned redemption destination and cannot be redeemed.');
+  }
   if (!coupon.remaining_balance || coupon.remaining_balance <= 0) throw new Error('No coupon balance remains.');
-  await redeemCouponAmount(id, coupon.remaining_balance);
+  try {
+    const reqId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : '00000000-0000-0000-0000-' + Date.now().toString().slice(-12);
+    await redeemCouponCv(id, reqId);
+  } catch {
+    await redeemCouponAmount(id, coupon.remaining_balance);
+  }
   return coupon.coupon_code;
 }
 
@@ -1054,14 +1140,59 @@ export async function adminGetPurchasedCoupons(page: number = 0, pageSize: numbe
 }
 
 export async function adminSuspendCompany(companyId: string): Promise<Company> {
-  const { data, error } = await supabase
-    .from("companies")
-    .update({ status: "suspended" })
-    .eq("id", companyId)
-    .select("id")
-    .single();
-  if (error) throw error;
-  return getCompany(data.id);
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('admin_suspend_company', {
+      p_company_id: companyId,
+    });
+    if (!rpcError && rpcData) {
+      return (rpcData as any) ?? getCompany(companyId);
+    }
+    const { data, error } = await supabase
+      .from("companies")
+      .update({ status: "suspended" })
+      .eq("id", companyId)
+      .select("id")
+      .single();
+    if (error) throw error;
+    return getCompany(data.id);
+  } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
+    const companies = getLocal<Company[]>("cv_companies", []);
+    const idx = companies.findIndex((c) => c.id === companyId);
+    if (idx !== -1) {
+      companies[idx].status = "suspended";
+      setLocal("cv_companies", companies);
+    }
+    return getCompany(companyId);
+  }
+}
+
+export async function adminUnsuspendCompany(companyId: string): Promise<Company> {
+  try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('admin_unsuspend_company', {
+      p_company_id: companyId,
+    });
+    if (!rpcError && rpcData) {
+      return (rpcData as any) ?? getCompany(companyId);
+    }
+    const { data, error } = await supabase
+      .from("companies")
+      .update({ status: "approved" })
+      .eq("id", companyId)
+      .select("id")
+      .single();
+    if (error) throw error;
+    return getCompany(data.id);
+  } catch (err: any) {
+    if (isSupabaseConfigured) throw err;
+    const companies = getLocal<Company[]>("cv_companies", []);
+    const idx = companies.findIndex((c) => c.id === companyId);
+    if (idx !== -1) {
+      companies[idx].status = "approved";
+      setLocal("cv_companies", companies);
+    }
+    return getCompany(companyId);
+  }
 }
 
 export async function getUserProfileData(userId: string): Promise<{

@@ -5,15 +5,26 @@ export class CouponError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); }
 }
 
-export async function verifyGameCoupon(client: SupabaseClient, code: string, userCountry: string | null) {
+export async function verifyGameCoupon(
+  client: SupabaseClient,
+  code: string,
+  userCountry: string | null,
+  callingApp: 'gaming' | 'lottery' = 'gaming'
+) {
   const { data: coupon, error } = await client.from('coupons')
-    .select('id,is_used,remaining_balance,status,country_code,issued_to,expiry_date')
+    .select('id,is_used,remaining_balance,status,country_code,issued_to,expiry_date,redemption_destination')
     .eq('code', code.trim()).maybeSingle();
   if (error) throw new CouponError('UNAVAILABLE','Unable to verify coupon. Retry later.',503);
   if (!coupon) throw new CouponError('INVALID_COUPON','Coupon not found.',404);
   if (coupon.is_used || coupon.status?.toLowerCase() === 'redeemed') throw new CouponError('REDEEMED','Coupon already redeemed.');
   if (coupon.status?.toLowerCase() !== 'active' || (coupon.expiry_date && new Date(coupon.expiry_date).getTime() <= Date.now())) {
     throw new CouponError('INACTIVE','Coupon is expired or unavailable.');
+  }
+  if (coupon.redemption_destination === null) {
+    throw new CouponError('UNCLASSIFIED_DESTINATION','Coupon has no redemption destination assigned. Contact support.');
+  }
+  if (coupon.redemption_destination !== undefined && coupon.redemption_destination !== callingApp) {
+    throw new CouponError('DESTINATION_MISMATCH',`Coupon destination mismatch: this coupon is for '${coupon.redemption_destination}' and cannot be redeemed in '${callingApp}'.`);
   }
   const { data: owner, error: ownerError } = await client.from('profiles').select('country_code,is_locked').eq('id',coupon.issued_to).maybeSingle();
   if (ownerError) throw new CouponError('UNAVAILABLE','Unable to verify coupon owner.',503);
@@ -24,5 +35,5 @@ export async function verifyGameCoupon(client: SupabaseClient, code: string, use
   }
   const amount = Number(coupon.remaining_balance);
   if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) throw new CouponError('INVALID_BALANCE','Coupon has no spendable balance.');
-  return { success:true, couponId:coupon.id, amount, currency:currencies[country], status:coupon.status, countryCode:country };
+  return { success:true, couponId:coupon.id, amount, currency:currencies[country], status:coupon.status, countryCode:country, redemptionDestination: coupon.redemption_destination ?? null };
 }

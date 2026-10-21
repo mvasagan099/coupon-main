@@ -8,6 +8,16 @@ import { getUserOrders, supabase } from "../lib/supabase";
 import { useState, useEffect } from "react";
 import { Eye, EyeOff, Copy, Check } from 'lucide-react';
 
+function getDestinationMetaSafe(dest?: string | null) {
+  if (!dest) return null;
+  const map: Record<string, { label: string; shortLabel: string; icon: string; badgeClass: string }> = {
+    gaming: { label: 'Gaming Application', shortLabel: 'Gaming App Only', icon: '🎮', badgeClass: 'badge-purple' },
+    lottery: { label: 'Lottery Application', shortLabel: 'Lottery App Only', icon: '🎰', badgeClass: 'badge-amber' },
+    couponvault: { label: 'CouponVault Store', shortLabel: 'CouponVault Store', icon: '🛍️', badgeClass: 'badge-green' },
+  };
+  return map[dest.toLowerCase()] ?? null;
+}
+
 export default function CouponPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -195,13 +205,25 @@ export default function CouponPage() {
                    </span>
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
                    <span style={{ background: 'rgba(0,0,0,0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 800, color: isUsed ? 'var(--text-4)' : 'var(--text-2)' }}>
                      SECURE NODE: {order.company?.prefix}
                    </span>
                    <span style={{ background: 'rgba(0,0,0,0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 800, color: isUsed ? 'var(--text-4)' : 'var(--text-2)' }}>
                      ID: {id?.substring(0,8).toUpperCase()}
                    </span>
+                   {(() => {
+                     const destMeta = getDestinationMetaSafe(order.coupon?.redemption_destination);
+                     return destMeta ? (
+                       <span className={`badge ${destMeta.badgeClass}`} style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>
+                         {destMeta.icon} {destMeta.shortLabel}
+                       </span>
+                     ) : (
+                       <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '0.15rem 0.45rem' }}>
+                         ⚠️ Unclassified
+                       </span>
+                     );
+                   })()}
                 </div>
               </div>
 
@@ -360,12 +382,22 @@ export default function CouponPage() {
 
             <div style={{ textAlign: 'center', width: '100%' }}>
                <h3 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-1)', marginBottom: '0.5rem' }}>
-                  {isUsed ? 'Transaction Completed' : 'Present to Merchant'}
+                  {isUsed ? 'Transaction Completed' : (() => {
+                    const dest = order.coupon?.redemption_destination;
+                    if (dest === 'gaming') return '🎮 Redeem inside Gaming App';
+                    if (dest === 'lottery') return '🎰 Redeem inside Lottery App';
+                    return 'Present to Merchant';
+                  })()}
                </h3>
                <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', fontWeight: 500, lineHeight: 1.5, maxWidth: '280px', margin: '0 auto' }}>
                   {isUsed 
                     ? 'This voucher has been scanned and the cashback has been credited to your wallet.' 
-                    : 'Show this QR code to the store manager to scan and unlock your rewards.'}
+                    : (() => {
+                      const dest = order.coupon?.redemption_destination;
+                      if (dest === 'gaming') return 'Enter your coupon code inside the connected Gaming application to top up your balance.';
+                      if (dest === 'lottery') return 'Enter your coupon code inside the connected Lottery application to enter games.';
+                      return 'Show this QR code to the store manager to scan and unlock your rewards.';
+                    })()}
                </p>
             </div>
           </div>

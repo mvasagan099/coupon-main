@@ -53,8 +53,25 @@ export default function ScanPage() {
 
   const isUsed = data?.is_used || data?.status?.toLowerCase() === 'redeemed';
   const isExpired = !!data?.expiry_date && new Date(data.expiry_date).getTime() <= now;
-  const isActive = !!data && !isUsed && !isExpired && data.status?.toLowerCase() === 'active' && Number(data.remaining_balance) > 0;
-  const statusLabel = isUsed ? 'Already redeemed' : isExpired ? 'Expired' : isActive ? 'Valid and active' : 'Unavailable';
+  const destination = data?.redemption_destination;
+  const isDestinationMismatch = !!data && destination !== 'couponvault';
+  const isUnclassified = !!data && !destination;
+  const isActive = !!data && !isUsed && !isExpired && !isDestinationMismatch && data.status?.toLowerCase() === 'active' && Number(data.remaining_balance) > 0;
+  
+  let statusLabel = isUsed ? 'Already redeemed' : isExpired ? 'Expired' : isActive ? 'Valid and active' : 'Unavailable';
+  let destinationNotice = '';
+  if (isDestinationMismatch) {
+    if (destination === 'gaming') {
+      statusLabel = 'Gaming application only';
+      destinationNotice = 'This coupon is restricted to the Gaming application and cannot be redeemed in CouponVault.';
+    } else if (destination === 'lottery') {
+      statusLabel = 'Lottery application only';
+      destinationNotice = 'This coupon is restricted to the Lottery application and cannot be redeemed in CouponVault.';
+    } else if (isUnclassified) {
+      statusLabel = 'Redemption unclassified';
+      destinationNotice = 'This coupon has no assigned redemption destination and cannot be redeemed. Please contact support.';
+    }
+  }
 
   return (
     <div
@@ -129,10 +146,10 @@ export default function ScanPage() {
               <h2 style={{ margin: '0.8rem 0 0.35rem', fontSize: '1.8rem', letterSpacing: '0.02em', wordSpacing: '0.08em', }}>
                 {data.company_name}
               </h2>
-              <p style={{ margin: 0, color: 'var(--text-3)', lineHeight: 1.6 }}>
+              <p style={{ margin: 0, color: isDestinationMismatch ? 'var(--red, #ef4444)' : 'var(--text-3)', lineHeight: 1.6, fontWeight: isDestinationMismatch ? 600 : 400 }}>
                 {isUsed
                   ? 'This voucher has already been processed in the system.'
-                  : isActive ? 'This voucher is ready for merchant-side redemption.' : 'This voucher cannot be redeemed.'}
+                  : isDestinationMismatch ? destinationNotice : isActive ? 'This voucher is ready for merchant-side redemption.' : 'This voucher cannot be redeemed.'}
               </p>
             </div>
 

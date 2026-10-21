@@ -12,6 +12,7 @@ import { getCountryByCode, getGatewaysForCountry } from '../lib/countries';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import { cardBackgroundImage } from '../lib/cardBackgrounds';
 import { formatOfferDate, offerUnavailable } from '../lib/couponOffer';
+import { getDestinationMeta } from '../lib/destinationConfig';
 import { useNow } from '../hooks/useNow';
 import { abandonCouponPayment, createCouponPayment, getCouponPaymentOptions, getStripe, loadRazorpayScript, openRazorpayCheckout, recoverCouponPayment, verifyPayment } from '../lib/paymentGateway';
 import type { CouponPaymentRecovery, GatewayCreateResponse, GatewayPublicConfig, GatewayVerifyResponse, PaymentGateway } from '../lib/paymentGateway';
@@ -264,10 +265,62 @@ function CouponOffer({ id }: { id: string }) {
     <div className="offer-columns">
       <div className="offer-content">
         <section className="card offer-section"><span className="section-label">About the company</span><h2>{details.company.name}</h2><dl className="offer-facts"><div><dt>Company status</dt><dd>Approved merchant</dd></div><div><dt>On CouponVault since</dt><dd>{formatOfferDate(details.company.joined_at)}</dd></div></dl><h3>Business address</h3><p>{details.company.address || 'The company has not provided a public business address.'}</p><p className="offer-note">This offer is published by {details.company.name}. Redemption is subject to the company’s terms below.</p></section>
-        <section className="card offer-section"><h2>Coupon details</h2><p className="offer-prewrap">{card.description || 'No additional description has been provided.'}</p><h3>Terms & conditions</h3><p className="offer-prewrap">{card.terms || 'No additional terms have been published. Contact support before buying if you need clarification.'}</p><h3>How to use</h3><p>After purchase, open My Cards to view your coupon and QR code. Redeem it with the issuing company before expiry. Only users registered in {getCountryByCode(card.country_code || '')?.name || card.country_code} can buy and redeem this offer.</p></section>
+        <section className="card offer-section">
+          <h2>Coupon details</h2>
+          <p className="offer-prewrap">{card.description || 'No additional description has been provided.'}</p>
+          <h3>Redemption restrictions</h3>
+          {(() => {
+            const destMeta = getDestinationMeta(card.redemption_destination);
+            return destMeta ? (
+              <div style={{ background: 'var(--surface-soft)', padding: '0.9rem 1rem', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1rem' }}>
+                <span style={{ fontSize: '1.5rem' }}>{destMeta.icon}</span>
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--text-1)', fontSize: '0.9rem' }}>
+                    {destMeta.label} Exclusive
+                  </div>
+                  <div style={{ color: 'var(--text-3)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+                    {destMeta.description}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ background: 'var(--surface-soft)', padding: '0.9rem 1rem', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1rem' }}>
+                <span style={{ fontSize: '1.5rem' }}>⚠️</span>
+                <div>
+                  <div style={{ fontWeight: 700, color: 'var(--amber)', fontSize: '0.9rem' }}>
+                    Unclassified Inventory
+                  </div>
+                  <div style={{ color: 'var(--text-3)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+                    This coupon does not yet have a designated application and will fail closed for redemption until assigned by an administrator.
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          <h3>Terms & conditions</h3>
+          <p className="offer-prewrap">{card.terms || 'No additional terms have been published. Contact support before buying if you need clarification.'}</p>
+          <h3>How to use</h3>
+          <p>After purchase, open My Cards to view your coupon and QR code. Redeem it with the issuing company before expiry. Only users registered in {getCountryByCode(card.country_code || '')?.name || card.country_code} can buy and redeem this offer.</p>
+        </section>
       </div>
       <aside className="card offer-section offer-checkout"><span className="section-label">Your coupon</span><h2>{card.title}</h2><div className="offer-price">{money(card.price)}</div><p className="offer-note">One coupon · No currency conversion</p>
-        <dl className="offer-facts"><div><dt>Coupon value</dt><dd>{money(card.value)}</dd></div><div><dt>Launch date</dt><dd>{formatOfferDate(card.created_at)}</dd></div><div><dt>Expiry date</dt><dd>{formatOfferDate(card.expiry_date)}</dd></div><div><dt>Available count</dt><dd>{card.available_count.toLocaleString()} coupons</dd></div><div><dt>Eligible country</dt><dd>{getCountryByCode(card.country_code || '')?.name || card.country_code}</dd></div></dl>
+        <dl className="offer-facts">
+          <div><dt>Coupon value</dt><dd>{money(card.value)}</dd></div>
+          <div><dt>Redemption</dt><dd>{(() => {
+            const destMeta = getDestinationMeta(card.redemption_destination);
+            return destMeta ? (
+              <span className={`badge ${destMeta.badgeClass}`} style={{ fontSize: '0.72rem' }}>
+                {destMeta.icon} {destMeta.shortLabel}
+              </span>
+            ) : (
+              <span className="badge badge-amber" style={{ fontSize: '0.72rem' }}>⚠️ Unclassified</span>
+            );
+          })()}</dd></div>
+          <div><dt>Launch date</dt><dd>{formatOfferDate(card.created_at)}</dd></div>
+          <div><dt>Expiry date</dt><dd>{formatOfferDate(card.expiry_date)}</dd></div>
+          <div><dt>Available count</dt><dd>{card.available_count.toLocaleString()} coupons</dd></div>
+          <div><dt>Eligible country</dt><dd>{getCountryByCode(card.country_code || '')?.name || card.country_code}</dd></div>
+        </dl>
         {unavailable && <p role="status" className="offer-warning">{unavailable}</p>}
         {!checkoutOpen && !pending && !walletRequestId ? <button className="btn btn-primary offer-wide" disabled={!!unavailable} onClick={() => setCheckoutOpen(true)}>Buy coupon</button> : <div className="offer-payment-choices">
           <h3>Choose how to pay</h3><div className="offer-wallet"><Wallet size={19}/><span>Wallet balance <strong>{money(balance)}</strong></span></div>

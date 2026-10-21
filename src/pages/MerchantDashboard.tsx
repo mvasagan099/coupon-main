@@ -6,6 +6,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import CountrySelector from '../components/CountrySelector';
 import { getCountryByCode } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
+import { getDestinationMeta } from '../lib/destinationConfig';
 import { Rocket, Store, AlertCircle, Edit3, Pause, Play, Copy, Trash2, Search, CheckCircle2, Clock, X, Layers, Filter } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../context/AuthContext';
@@ -265,6 +266,7 @@ export default function MerchantDashboard() {
         banner_image: banner,
         terms: wizardForm.terms,
         issue_limit: issueLimitNum,
+        redemption_destination: company.redemption_destination || undefined,
       });
 
       success('Campaign launched', `"${newCard.title}" has been published to the marketplace.`);
@@ -742,6 +744,25 @@ export default function MerchantDashboard() {
               {wizardStep === 1 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }} className="fade-in">
                   <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-1)', margin: 0 }}>Gift card details</h3>
+                  <div style={{ background: 'var(--bg-3)', padding: '0.85rem 1rem', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div>
+                      <span style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-4)', fontWeight: 700 }}>Redemption Destination</span>
+                      <div style={{ marginTop: '0.2rem' }}>
+                        {company?.redemption_destination ? (
+                          <span className={`badge ${getDestinationMeta(company.redemption_destination)?.badgeClass || 'badge-green'}`} style={{ fontSize: '0.75rem' }}>
+                            {getDestinationMeta(company.redemption_destination)?.icon} {getDestinationMeta(company.redemption_destination)?.label}
+                          </span>
+                        ) : (
+                          <span className="badge badge-amber" style={{ fontSize: '0.75rem' }}>⚠️ Unclassified (Pending Admin Assignment)</span>
+                        )}
+                      </div>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-4)', maxWidth: '300px' }}>
+                      {company?.redemption_destination
+                        ? `Configured by platform admin. Issued coupons are permanently locked to ${getDestinationMeta(company.redemption_destination)?.label}.`
+                        : 'Coupons will fail closed for redemption until an admin assigns a destination to your brand.'}
+                    </p>
+                  </div>
                   <div className="form-group">
                     <label className="label" htmlFor="coupon-country">Coupon country (required)</label>
                     <CountrySelector id="coupon-country" required value={wizardForm.countryCode} onChange={country => setWizardForm({ ...wizardForm, countryCode: country.code })} />
@@ -1084,6 +1105,19 @@ export default function MerchantDashboard() {
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                                 {country.flag} {country.name}
                               </span>
+                              <span>·</span>
+                              {(() => {
+                                const destMeta = getDestinationMeta(offer.redemption_destination || company?.redemption_destination);
+                                return destMeta ? (
+                                  <span className={`badge ${destMeta.badgeClass}`} style={{ fontSize: '0.7rem' }}>
+                                    {destMeta.icon} {destMeta.shortLabel}
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-amber" style={{ fontSize: '0.7rem' }}>
+                                    ⚠️ Unclassified
+                                  </span>
+                                );
+                              })()}
                               <span>·</span>
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                                 <Clock size={12} /> Exp: {offer.expiry_date ? new Date(offer.expiry_date).toLocaleDateString() : 'None'}

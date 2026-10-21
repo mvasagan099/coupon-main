@@ -41,6 +41,7 @@ import CountrySelector from '../components/CountrySelector';
 import type { CountryInfo } from '../lib/countries';
 import { getCountryByCode, getCountryBankConfig, getPreferredGateway } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
+import { getDestinationMeta } from '../lib/destinationConfig';
 
 const validSections = ['marketplace', 'wallet', 'activity', 'cards'] as const;
 type UserSection = (typeof validSections)[number];
@@ -709,6 +710,7 @@ export default function UserDashboard() {
     const prefix = voucher.company_prefix;
     const logoUrl = voucher.company_logo_url;
     const terms = voucher.card_terms || parentCard?.terms;
+    const redemptionDestination = voucher.redemption_destination || parentCard?.redemption_destination || null;
 
     return {
       parentCard,
@@ -721,6 +723,7 @@ export default function UserDashboard() {
       prefix,
       logoUrl,
       terms,
+      redemptionDestination,
     };
   }, [giftCards]);
 
@@ -852,7 +855,14 @@ export default function UserDashboard() {
                         />
                         <div className="marketplace-card-overlay" />
                         <div className="marketplace-card-sheen" />
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', position: 'relative', zIndex: 3 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', position: 'relative', zIndex: 3 }}>
+                          {card.redemption_destination ? (
+                            <span className={`badge ${getDestinationMeta(card.redemption_destination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.7rem' }}>
+                              {getDestinationMeta(card.redemption_destination)?.icon} {getDestinationMeta(card.redemption_destination)?.shortLabel}
+                            </span>
+                          ) : (
+                            <span className="badge badge-amber" style={{ fontSize: '0.7rem' }}>⚠️ Unclassified</span>
+                          )}
                           <span className="badge marketplace-card-badge">
                             Save {savingsPct}%
                           </span>
@@ -1550,11 +1560,22 @@ export default function UserDashboard() {
                                       </span>
                                       <ShieldCheck size={14} style={{ color: '#80f9c8', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))', flexShrink: 0 }} />
                                     </div>
-                                    {meta.prefix && (
-                                      <span style={{ fontSize: '0.64rem', fontWeight: 700, color: 'rgba(255,255,255,0.82)', textShadow: '0 1px 2px rgba(0,0,0,0.6)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                        Node: {meta.prefix}
-                                      </span>
-                                    )}
+                                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.1rem', flexWrap: 'wrap' }}>
+                                      {meta.prefix && (
+                                        <span style={{ fontSize: '0.64rem', fontWeight: 700, color: 'rgba(255,255,255,0.82)', textShadow: '0 1px 2px rgba(0,0,0,0.6)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                          Node: {meta.prefix}
+                                        </span>
+                                      )}
+                                      {meta.redemptionDestination ? (
+                                        <span className={`badge ${getDestinationMeta(meta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
+                                          {getDestinationMeta(meta.redemptionDestination)?.icon} {getDestinationMeta(meta.redemptionDestination)?.shortLabel}
+                                        </span>
+                                      ) : (
+                                        <span className="badge badge-amber" style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem' }}>
+                                          ⚠️ Unclassified
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
 
@@ -2048,13 +2069,22 @@ export default function UserDashboard() {
                         </span>
                         <ShieldCheck size={15} style={{ color: '#80f9c8', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.6))' }} />
                       </div>
-                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.1rem' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', marginTop: '0.1rem', flexWrap: 'wrap' }}>
                         {activeMeta.prefix && (
                           <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'rgba(255,255,255,0.85)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                             Node: {activeMeta.prefix}
                           </span>
                         )}
                         <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.7)' }}>• ID: {activeVoucher.id.substring(0, 8).toUpperCase()}</span>
+                        {activeMeta.redemptionDestination ? (
+                          <span className={`badge ${getDestinationMeta(activeMeta.redemptionDestination)?.badgeClass || 'badge-cyan'}`} style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
+                            {getDestinationMeta(activeMeta.redemptionDestination)?.icon} {getDestinationMeta(activeMeta.redemptionDestination)?.shortLabel}
+                          </span>
+                        ) : (
+                          <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '0.1rem 0.4rem' }}>
+                            ⚠️ Unclassified
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2090,11 +2120,30 @@ export default function UserDashboard() {
 
               {/* Modal Body */}
               <div style={{ padding: '1.25rem' }}>
+                {/* Destination info notice */}
+                <div style={{ background: 'var(--surface-soft)', padding: '0.75rem 0.9rem', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1rem' }}>
+                  <span style={{ fontSize: '1.25rem' }}>
+                    {getDestinationMeta(activeMeta.redemptionDestination)?.icon || '⚠️'}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-1)' }}>
+                      {getDestinationMeta(activeMeta.redemptionDestination)?.label || 'Unclassified Voucher'}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                      {getDestinationMeta(activeMeta.redemptionDestination)?.description || 'Unclassified coupons cannot be redeemed externally until assigned by an administrator.'}
+                    </div>
+                  </div>
+                </div>
+
                 {/* QR Code Container */}
                 <div style={{ background: '#ffffff', borderRadius: '20px', padding: '1.2rem', display: 'grid', placeItems: 'center', boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
                   <QRCode value={activeVoucher.code} size={190} fgColor="#0f172a" />
                   <span style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.6rem', fontWeight: 600 }}>
-                    Scan with merchant terminal to redeem
+                    {activeMeta.redemptionDestination === 'gaming'
+                      ? '🎮 Redeem directly inside the Gaming application'
+                      : activeMeta.redemptionDestination === 'lottery'
+                      ? '🎰 Redeem directly inside the Lottery application'
+                      : 'Scan with merchant terminal to redeem'}
                   </span>
                 </div>
 

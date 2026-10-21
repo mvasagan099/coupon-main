@@ -16,6 +16,7 @@ import {
   adminMarkSettlementPaid,
   adminRejectCompany,
   adminSuspendCompany,
+  adminUnsuspendCompany,
   createCompany,
   deleteCompany,
   deleteGiftCard,
@@ -30,10 +31,13 @@ import {
   adminUpdateTicketStatus,
   getSupportTicketMessages,
   sendSupportMessage,
+  adminSetCompanyDestination,
 } from '../lib/supabase';
 
 import { COUNTRIES, getCountryByCode } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
+import { DESTINATIONS, getDestinationMeta } from '../lib/destinationConfig';
+import type { RedemptionDestination } from '../lib/destinationConfig';
 
 const validSections = ['overview', 'partners', 'users', 'ledger', 'approvals', 'security', 'offers', 'settlements', 'payouts', 'support', 'rates'] as const;
 type AdminSection = (typeof validSections)[number];
@@ -61,6 +65,9 @@ export default function AdminDashboard() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [destinationFilter, setDestinationFilter] = useState<'all' | 'gaming' | 'lottery' | 'couponvault' | 'unclassified'>('all');
+  const [selectedDestination, setSelectedDestination] = useState<RedemptionDestination | ''>('');
+  const [destinationLoading, setDestinationLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ 
     name: '', prefix: '', coupon_limit: 100, 
@@ -348,6 +355,14 @@ export default function AdminDashboard() {
 
   const pendingCompanies = useMemo(() => companies.filter((company) => company.status === 'pending'), [companies]);
 
+  const filteredStats = useMemo(() => {
+    return stats.filter(entry => {
+      if (destinationFilter === 'all') return true;
+      if (destinationFilter === 'unclassified') return !entry.company.redemption_destination;
+      return entry.company.redemption_destination === destinationFilter;
+    });
+  }, [stats, destinationFilter]);
+
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
       const query = userSearch.toLowerCase();
@@ -444,17 +459,28 @@ export default function AdminDashboard() {
     }
   }
 
-  async function handleSuspend(id: string, name: string) {
+  async function handleToggleSuspend(id: string, name: string, isCurrentlySuspended: boolean) {
     setSuspendingId(id);
     try {
-      await adminSuspendCompany(id);
-      success('Partner suspended', `${name} has been moved to suspended status.`);
-      if (selectedCompany?.id === id) {
-        setSelectedCompany({ ...selectedCompany, status: 'suspended' });
+      if (isCurrentlySuspended) {
+        await adminUnsuspendCompany(id);
+        success('Partner unsuspended', `${name} has been restored to active status.`);
+        if (selectedCompany?.id === id) {
+          setSelectedCompany({ ...selectedCompany, status: 'approved' });
+        }
+      } else {
+        await adminSuspendCompany(id);
+        success('Partner suspended', `${name} has been moved to suspended status.`);
+        if (selectedCompany?.id === id) {
+          setSelectedCompany({ ...selectedCompany, status: 'suspended' });
+        }
       }
-      loadCompanies();
+      await loadCompanies();
     } catch (err: unknown) {
-      toastError('Suspend failed', getErrorMessage(err, 'Failed to suspend company.'));
+      toastError(
+        isCurrentlySuspended ? 'Unsuspend failed' : 'Suspend failed',
+        getErrorMessage(err, `Failed to ${isCurrentlySuspended ? 'unsuspend' : 'suspend'} company.`)
+      );
     } finally {
       setSuspendingId(null);
     }
@@ -632,7 +658,21 @@ export default function AdminDashboard() {
 
       {currentSection === 'partners' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-3)', fontWeight: 600, marginRight: '0.25rem' }}>Destination:</span>
+              {(['all', 'gaming', 'lottery', 'couponvault', 'unclassified'] as const).map(dest => (
+                <button
+                  key={dest}
+                  type="button"
+                  className={`btn btn-sm ${destinationFilter === dest ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setDestinationFilter(dest)}
+                  style={{ textTransform: 'capitalize', fontSize: '0.75rem', padding: '0.25rem 0.65rem' }}
+                >
+                  {dest === 'all' ? 'All Partners' : dest === 'unclassified' ? '⚠️ Unclassified' : `${DESTINATIONS[dest]?.icon} ${DESTINATIONS[dest]?.shortLabel}`}
+                </button>
+              ))}
+            </div>
             <button className="btn btn-primary btn-sm" onClick={() => setShowForm((current) => !current)}>
               {showForm ? 'Cancel' : 'New partner'}
             </button>
@@ -701,8 +741,10 @@ export default function AdminDashboard() {
           <div className="glass-card-strong" style={{ padding: '1.5rem' }}>
             {loadingCompanies ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem 0' }}><div className="spinner" /></div>
-            ) : stats.length === 0 ? (
-              <div style={{ padding: '2rem 0', textAlign: 'center', color: 'var(--text-3)' }}>No partner brands registered yet.</div>
+            ) : filteredStats.length === 0 ? (
+              <div style={{ padding: '2rem 0', textAlign: 'center', color: 'var(--text-3)' }}>
+                {destinationFilter === 'all' ? 'No partner brands registered yet.' : `No partner brands found for ${destinationFilter}.`}
+              </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table className="premium-table">
@@ -710,6 +752,7 @@ export default function AdminDashboard() {
                     <tr>
                       <th>Brand name</th>
                       <th>Prefix</th>
+                      <th>Destination</th>
                       <th>Total templates</th>
                       <th>Global card limit</th>
                       <th>Status</th>
@@ -717,37 +760,52 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.map((entry) => (
-                      <tr key={entry.company.id}>
-                        <td>
-                          <p style={{ fontWeight: 700, color: 'var(--text-1)', margin: 0 }}>{entry.company.name}</p>
-                          <p style={{ fontSize: '0.75rem', color: 'var(--text-4)', margin: 0 }}>
-                            Created {new Date(entry.company.created_at).toLocaleDateString()}
-                          </p>
-                        </td>
-                        <td className="mono">{entry.company.prefix}</td>
-                        <td className="mono">{entry.issued}</td>
-                        <td>
-                          <span className="mono">{entry.company.coupon_limit}</span>
-                        </td>
-                        <td>
-                          <span className={`badge ${entry.company.status === 'approved' ? 'badge-green' : entry.company.status === 'pending' ? 'badge-amber' : 'badge-red'}`}>
-                            {entry.company.status}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button 
-                            className="btn btn-secondary btn-sm" 
-                            onClick={() => {
-                              setSelectedCompany(entry.company);
-                              setEditingLimit(entry.company.coupon_limit);
-                            }}
-                          >
-                            Manage
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredStats.map((entry) => {
+                      const destMeta = getDestinationMeta(entry.company.redemption_destination);
+                      return (
+                        <tr key={entry.company.id}>
+                          <td>
+                            <p style={{ fontWeight: 700, color: 'var(--text-1)', margin: 0 }}>{entry.company.name}</p>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--text-4)', margin: 0 }}>
+                              Created {new Date(entry.company.created_at).toLocaleDateString()}
+                            </p>
+                          </td>
+                          <td className="mono">{entry.company.prefix}</td>
+                          <td>
+                            {destMeta ? (
+                              <span className={`badge ${destMeta.badgeClass}`} style={{ fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                                {destMeta.icon} {destMeta.shortLabel}
+                              </span>
+                            ) : (
+                              <span className="badge badge-amber" style={{ fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                                ⚠️ Unclassified
+                              </span>
+                            )}
+                          </td>
+                          <td className="mono">{entry.issued}</td>
+                          <td>
+                            <span className="mono">{entry.company.coupon_limit}</span>
+                          </td>
+                          <td>
+                            <span className={`badge ${entry.company.status === 'approved' ? 'badge-green' : entry.company.status === 'pending' ? 'badge-amber' : 'badge-red'}`}>
+                              {entry.company.status}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button 
+                              className="btn btn-secondary btn-sm" 
+                              onClick={() => {
+                                setSelectedCompany(entry.company);
+                                setEditingLimit(entry.company.coupon_limit);
+                                setSelectedDestination(entry.company.redemption_destination || '');
+                              }}
+                            >
+                              Manage
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -805,6 +863,18 @@ export default function AdminDashboard() {
                           <p style={{ margin: '0 0 0.25rem', fontSize: '0.75rem', color: 'var(--text-4)' }}>PAN</p>
                           <p className="mono" style={{ margin: 0, color: 'var(--text-1)' }}>{selectedCompany.pan || 'Not Provided'}</p>
                         </div>
+                        <div>
+                          <p style={{ margin: '0 0 0.25rem', fontSize: '0.75rem', color: 'var(--text-4)' }}>Destination</p>
+                          {selectedCompany.redemption_destination ? (
+                            <span className={`badge ${DESTINATIONS[selectedCompany.redemption_destination]?.badgeClass || 'badge-cyan'}`} style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem' }}>
+                              {DESTINATIONS[selectedCompany.redemption_destination]?.icon} {DESTINATIONS[selectedCompany.redemption_destination]?.shortLabel}
+                            </span>
+                          ) : (
+                            <span className="badge badge-amber" style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem' }}>
+                              ⚠️ Unclassified
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -842,6 +912,48 @@ export default function AdminDashboard() {
                     </div>
                     
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {/* Destination Assignment Control */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', background: 'var(--bg-3)', padding: '1rem 1.25rem', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                        <div>
+                          <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-1)', fontSize: '0.95rem' }}>Redemption Destination</p>
+                          <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-4)' }}>Only admins may configure the permitted redemption app</p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                          <select
+                            className="input"
+                            value={selectedDestination}
+                            onChange={(event) => setSelectedDestination(event.target.value as RedemptionDestination | '')}
+                            style={{ minWidth: '180px', padding: '0.45rem 0.75rem', fontSize: '0.85rem' }}
+                          >
+                            <option value="">-- Unclassified --</option>
+                            <option value="gaming">🎮 Gaming App</option>
+                            <option value="lottery">🎰 Lottery App</option>
+                            <option value="couponvault">🛍️ CouponVault</option>
+                          </select>
+                          <button
+                            disabled={destinationLoading || !selectedDestination || selectedDestination === selectedCompany.redemption_destination}
+                            className="btn btn-primary"
+                            style={{ padding: '0.5rem 1rem' }}
+                            onClick={async () => {
+                              if (!selectedDestination) return;
+                              setDestinationLoading(true);
+                              try {
+                                await adminSetCompanyDestination(selectedCompany.id, selectedDestination as RedemptionDestination);
+                                success('Destination updated', `${selectedCompany.name} destination set to ${DESTINATIONS[selectedDestination as RedemptionDestination]?.label}.`);
+                                setSelectedCompany({ ...selectedCompany, redemption_destination: selectedDestination as RedemptionDestination });
+                                await loadCompanies();
+                              } catch (err: unknown) {
+                                toastError('Update failed', getErrorMessage(err, 'Failed to update destination.'));
+                              } finally {
+                                setDestinationLoading(false);
+                              }
+                            }}
+                          >
+                            {destinationLoading ? 'Updating...' : 'Set Destination'}
+                          </button>
+                        </div>
+                      </div>
+
                       {/* Global Limit Control */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', background: 'var(--bg-3)', padding: '1rem 1.25rem', borderRadius: '12px', border: '1px solid var(--border)' }}>
                         <div>
@@ -882,7 +994,12 @@ export default function AdminDashboard() {
                       
                       {/* Danger Zone */}
                       <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                         <button disabled={suspendingId === selectedCompany.id} className="btn btn-secondary" style={{ padding: '0.5rem 1.5rem', fontWeight: 600 }} onClick={() => handleSuspend(selectedCompany.id, selectedCompany.name)}>
+                         <button
+                           disabled={suspendingId === selectedCompany.id}
+                           className="btn btn-secondary"
+                           style={{ padding: '0.5rem 1.5rem', fontWeight: 600 }}
+                           onClick={() => handleToggleSuspend(selectedCompany.id, selectedCompany.name, selectedCompany.status === 'suspended')}
+                         >
                            {suspendingId === selectedCompany.id ? 'Processing...' : selectedCompany.status === 'suspended' ? 'Unsuspend Partner' : 'Suspend Partner'}
                          </button>
                          <button disabled={deletingId === selectedCompany.id} className="btn btn-danger" style={{ padding: '0.5rem 1.5rem', fontWeight: 600 }} onClick={() => handleDelete(selectedCompany.id, selectedCompany.name)}>
@@ -914,6 +1031,7 @@ export default function AdminDashboard() {
                   <th>Offer ID</th>
                   <th>Merchant</th>
                   <th>Campaign Title</th>
+                  <th>Destination</th>
                   <th>Value / Price</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
@@ -921,7 +1039,7 @@ export default function AdminDashboard() {
               <tbody>
                 {offers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-3)' }}>
+                    <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-3)' }}>
                       No published offers found.
                     </td>
                   </tr>
@@ -931,6 +1049,20 @@ export default function AdminDashboard() {
                       <td className="mono" style={{ fontSize: '0.8rem', color: 'var(--text-4)' }}>{offer.id.split('-')[0]}...</td>
                       <td style={{ fontWeight: 600 }}>{offer.company_name || 'Unknown'}</td>
                       <td>{offer.title}</td>
+                      <td>
+                        {(() => {
+                          const destMeta = getDestinationMeta(offer.redemption_destination);
+                          return destMeta ? (
+                            <span className={`badge ${destMeta.badgeClass}`} style={{ fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                              {destMeta.icon} {destMeta.shortLabel}
+                            </span>
+                          ) : (
+                            <span className="badge badge-amber" style={{ fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                              ⚠️ Unclassified
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="mono" style={{ fontSize: '0.9rem' }}>
                         <span style={{ color: 'var(--text-3)' }}>Price:</span> ₹{offer.price.toFixed(2)} <br />
                         <span style={{ color: 'var(--text-3)' }}>Value:</span> ₹{offer.value.toFixed(2)}
@@ -1063,6 +1195,7 @@ export default function AdminDashboard() {
                   <tr>
                     <th>Voucher code</th>
                     <th>Partner brand</th>
+                    <th>Destination</th>
                     <th>Face value</th>
                     <th>Price paid</th>
                     <th>Consumer email</th>
@@ -1074,6 +1207,20 @@ export default function AdminDashboard() {
                     <tr key={coupon.coupon_id}>
                       <td className="mono" style={{ fontWeight: 700, color: 'var(--cyan)' }}>{coupon.coupon_code}</td>
                       <td style={{ fontWeight: 700, color: 'var(--text-1)' }}>{coupon.company_name}</td>
+                      <td>
+                        {(() => {
+                          const destMeta = getDestinationMeta((coupon as any).redemption_destination);
+                          return destMeta ? (
+                            <span className={`badge ${destMeta.badgeClass}`} style={{ fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                              {destMeta.icon} {destMeta.shortLabel}
+                            </span>
+                          ) : (
+                            <span className="badge badge-amber" style={{ fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                              ⚠️ Unclassified
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="mono">₹{(coupon.value ?? coupon.remaining_balance).toFixed(2)}</td>
                       <td className="mono">₹{(coupon.price ?? coupon.remaining_balance * 0.9).toFixed(2)}</td>
                       <td style={{ color: 'var(--text-3)' }}>{coupon.user_email || 'anonymous'}</td>

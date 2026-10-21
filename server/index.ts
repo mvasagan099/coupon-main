@@ -9,7 +9,7 @@ import { RazorpayService } from './services/RazorpayService';
 import { StripeService } from './services/StripeService';
 import { PayPalService } from './services/PayPalService';
 import type { PaymentGateway } from './services/PaymentService';
-import { userAuthentication } from './security';
+import { userAuthentication, applicationAuthentication } from './security';
 import { verifyGameCoupon, CouponError } from './couponVerification';
 import { findPayment, settlePayment } from './paymentSettlement';
 import { recoverStripePayment } from './stripeRecovery';
@@ -136,6 +136,7 @@ const authenticateAPIKey = (
 // payment endpoints are not blocked by the server-to-server API key check.
 
 const authenticateUserJWT = userAuthentication(supabase);
+const authenticateApplication = applicationAuthentication();
 
 // ── Payment gateway singletons (lazy-initialised) ────────────────────────────
 // Each service is only constructed when its env vars are present, so the server
@@ -202,7 +203,7 @@ function normalizeCountryCode(country: unknown): string | null {
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 // POST /api/v1/coupons/verify
-app.post('/api/v1/coupons/verify', writeLimiter, authenticateAPIKey, async (req, res) => {
+app.post('/api/v1/coupons/verify', writeLimiter, authenticateApplication, async (req, res) => {
   try {
     const { couponCode, userCountry } = req.body;
 
@@ -210,7 +211,8 @@ app.post('/api/v1/coupons/verify', writeLimiter, authenticateAPIKey, async (req,
       return res.status(400).json({ success: false, code: 'INVALID_COUPON', message: 'couponCode is required.' });
     }
 
-    const quote = await verifyGameCoupon(supabase, couponCode, normalizeCountryCode(userCountry));
+    const callingApp = (res.locals.callingApp as 'gaming' | 'lottery') || 'gaming';
+    const quote = await verifyGameCoupon(supabase, couponCode, normalizeCountryCode(userCountry), callingApp);
     return res.json(quote);
 
   } catch (err) {
@@ -222,24 +224,48 @@ app.post('/api/v1/coupons/verify', writeLimiter, authenticateAPIKey, async (req,
 
 // POST /api/v1/coupons/redeem
 // HIGH-05: Validate ALL required fields; amount bounded
-app.post('/api/v1/coupons/redeem', writeLimiter, authenticateAPIKey, async (req, res) => {
+app.post('/api/v1/coupons/redeem', writeLimiter, authenticateApplication, async (req, res) => {
   try {
     const { couponId, userId, gameId, walletTransactionId, ipAddress, device, userCountry } = req.body;
 
     if (
       !isNonEmptyString(couponId) ||
       !isNonEmptyString(userId) ||
-      !isNonEmptyString(gameId) ||
       !isNonEmptyString(walletTransactionId)
     ) {
       return res.status(400).json({ success: false, message: 'Missing or invalid required parameters.' });
     }
 
+    // callingApp is strictly resolved from verified application credentials in res.locals
+    const callingApp = (res.locals.callingApp as 'gaming' | 'lottery') || 'gaming';
+
     const { data: couponRecord } = await supabase
       .from('coupons')
-      .select('id, country_code, issued_to')
+      .select('id, country_code, issued_to, redemption_destination')
       .eq('id', couponId)
       .maybeSingle();
+
+    if (!couponRecord) {
+      return res.status(404).json({ success: false, code: 'INVALID_COUPON', message: 'Coupon not found.' });
+    }
+
+    // Fail closed: unclassified coupons cannot be redeemed externally
+    if (couponRecord.redemption_destination === null) {
+      return res.status(400).json({
+        success: false,
+        code: 'UNCLASSIFIED_DESTINATION',
+        message: 'Coupon has no redemption destination assigned. Contact support.'
+      });
+    }
+
+    // Enforce destination restriction
+    if (couponRecord.redemption_destination !== undefined && couponRecord.redemption_destination !== callingApp) {
+      return res.status(400).json({
+        success: false,
+        code: 'DESTINATION_MISMATCH',
+        message: `Coupon destination mismatch: this coupon is for '${couponRecord.redemption_destination}' and cannot be redeemed in '${callingApp}'.`
+      });
+    }
 
     let couponCountryRaw = couponRecord?.country_code;
     if (!couponCountryRaw && couponRecord?.issued_to) {
@@ -266,23 +292,42 @@ app.post('/api/v1/coupons/redeem', writeLimiter, authenticateAPIKey, async (req,
       }
     }
 
-    const { error } = await supabase.rpc('redeem_game_coupon', {
+    let rpcError = null;
+    const { error: appError } = await supabase.rpc('redeem_application_coupon', {
       p_coupon_id:           couponId,
-      p_game_user_id:        userId,
-      p_game_id:             gameId,
-      p_wallet_transaction_id: walletTransactionId,
+      p_calling_app:         callingApp,
+      p_app_user_id:        userId,
+      p_app_transaction_id: walletTransactionId,
       p_ip_address:          isNonEmptyString(ipAddress) ? ipAddress : '0.0.0.0',
       p_device:              isNonEmptyString(device)    ? device    : 'unknown',
       p_user_country:        normUserCountry,
     });
 
-    if (error) {
-      console.error('[/coupons/redeem]', error);
-      const isCountryMismatch = error.message.includes('Country mismatch');
+    if (appError) {
+      if (appError.message?.includes('redeem_application_coupon') || appError.code === '42883') {
+        const { error: legacyError } = await supabase.rpc('redeem_game_coupon', {
+          p_coupon_id:           couponId,
+          p_game_user_id:        userId,
+          p_game_id:             gameId || callingApp,
+          p_wallet_transaction_id: walletTransactionId,
+          p_ip_address:          isNonEmptyString(ipAddress) ? ipAddress : '0.0.0.0',
+          p_device:              isNonEmptyString(device)    ? device    : 'unknown',
+          p_user_country:        normUserCountry,
+        });
+        rpcError = legacyError;
+      } else {
+        rpcError = appError;
+      }
+    }
+
+    if (rpcError) {
+      console.error('[/coupons/redeem]', rpcError);
+      const isCountryMismatch = rpcError.message.includes('Country mismatch');
+      const isDestMismatch = rpcError.message.includes('destination mismatch') || rpcError.message.includes('no redemption destination');
       return res.status(400).json({
         success: false,
-        code: isCountryMismatch ? 'COUNTRY_MISMATCH' : 'REDEEM_FAILED',
-        message: error.message
+        code: isCountryMismatch ? 'COUNTRY_MISMATCH' : isDestMismatch ? 'DESTINATION_MISMATCH' : 'REDEEM_FAILED',
+        message: rpcError.message
       });
     }
 
