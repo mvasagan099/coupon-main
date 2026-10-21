@@ -633,6 +633,23 @@ export default function UserDashboard() {
 
   const filteredCatalog = useMemo(() => {
     return giftCards.filter((card) => {
+      // Hide lottery and gaming hub coupons from the marketplace page
+      const dest = card.redemption_destination?.toLowerCase().trim();
+      const compName = card.company_name?.toLowerCase().trim() || '';
+      const cardTitle = card.title?.toLowerCase().trim() || '';
+
+      const isHiddenMarketplaceCard =
+        dest === 'gaming' ||
+        dest === 'lottery' ||
+        compName === 'gaminghub' ||
+        compName.includes('gaming hub') ||
+        compName.includes('gaminghub') ||
+        compName.includes('lottery') ||
+        cardTitle.includes('gaming') ||
+        cardTitle.includes('lottery');
+
+      if (isHiddenMarketplaceCard) return false;
+
       const matchesSearch =
         card.title.toLowerCase().includes(catalogSearch.toLowerCase()) ||
         (card.company_name && card.company_name.toLowerCase().includes(catalogSearch.toLowerCase()));
