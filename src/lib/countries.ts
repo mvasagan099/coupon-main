@@ -94,6 +94,112 @@ export function searchCountries(query: string): CountryInfo[] {
   );
 }
 
+export interface CountryBusinessConfig {
+  taxIdLabel: string;
+  taxIdPlaceholder: string;
+  secondaryTaxLabel: string;
+  secondaryTaxPlaceholder: string;
+  secondaryTaxRequired: boolean;
+  routingLabel: string;
+  routingPlaceholder: string;
+  accountLabel: string;
+  accountPlaceholder: string;
+  bankPlaceholder: string;
+}
+
+/** Get country-tailored merchant business identification & banking configuration. */
+export function getCountryBusinessConfig(countryCode: string | null | undefined): CountryBusinessConfig {
+  const code = (countryCode || '').toUpperCase();
+
+  if (code === 'IN') {
+    return {
+      taxIdLabel: 'GSTIN ID',
+      taxIdPlaceholder: '15-character GSTIN (e.g. 29ABCDE1234F1Z5)',
+      secondaryTaxLabel: 'PAN Number',
+      secondaryTaxPlaceholder: '10-character PAN (e.g. ABCDE1234F)',
+      secondaryTaxRequired: true,
+      routingLabel: 'IFSC Code',
+      routingPlaceholder: 'e.g. HDFC0001234',
+      accountLabel: 'Bank Account Number',
+      accountPlaceholder: 'e.g. 50100234567890',
+      bankPlaceholder: 'e.g. HDFC Bank, SBI, ICICI',
+    };
+  }
+
+  if (code === 'US') {
+    return {
+      taxIdLabel: 'Federal Tax ID (EIN)',
+      taxIdPlaceholder: '9-digit EIN (e.g. 12-3456789)',
+      secondaryTaxLabel: 'State Tax / Business Reg. ID (Optional)',
+      secondaryTaxPlaceholder: 'State registration or filing number',
+      secondaryTaxRequired: false,
+      routingLabel: 'ACH / ABA Routing Number',
+      routingPlaceholder: '9-digit routing number',
+      accountLabel: 'Checking / Account Number',
+      accountPlaceholder: 'Bank account number',
+      bankPlaceholder: 'e.g. Chase, Bank of America, Wells Fargo',
+    };
+  }
+
+  if (code === 'GB') {
+    return {
+      taxIdLabel: 'VAT Registration Number',
+      taxIdPlaceholder: 'e.g. GB 123 4567 89 or Tax ID',
+      secondaryTaxLabel: 'Company Reg. Number (CRN) (Optional)',
+      secondaryTaxPlaceholder: '8-digit CRN (e.g. 01234567)',
+      secondaryTaxRequired: false,
+      routingLabel: 'Sort Code / BIC',
+      routingPlaceholder: 'e.g. 20-04-15',
+      accountLabel: 'Account Number / IBAN',
+      accountPlaceholder: 'e.g. 12345678 or GB IBAN',
+      bankPlaceholder: 'e.g. Barclays, HSBC UK, Lloyds',
+    };
+  }
+
+  if (code === 'AU') {
+    return {
+      taxIdLabel: 'ABN (Australian Business Number)',
+      taxIdPlaceholder: '11-digit ABN (e.g. 12 345 678 901)',
+      secondaryTaxLabel: 'ACN / Reg. Number (Optional)',
+      secondaryTaxPlaceholder: '9-digit ACN',
+      secondaryTaxRequired: false,
+      routingLabel: 'BSB Number',
+      routingPlaceholder: '6-digit BSB (e.g. 062-000)',
+      accountLabel: 'Bank Account Number',
+      accountPlaceholder: 'e.g. 12345678',
+      bankPlaceholder: 'e.g. Commonwealth Bank, ANZ, NAB',
+    };
+  }
+
+  if (code === 'AE') {
+    return {
+      taxIdLabel: 'Trade License / Registration No.',
+      taxIdPlaceholder: 'Trade License or Commercial Reg. No.',
+      secondaryTaxLabel: 'Tax Reg. Number (TRN) (Optional)',
+      secondaryTaxPlaceholder: '15-digit TRN (e.g. 100XXXXXXXXX00003)',
+      secondaryTaxRequired: false,
+      routingLabel: 'SWIFT / BIC Code',
+      routingPlaceholder: 'e.g. EBILAEADXXX',
+      accountLabel: 'IBAN',
+      accountPlaceholder: 'e.g. AE070330000000000123456',
+      bankPlaceholder: 'e.g. Emirates NBD, ADCB, FAB',
+    };
+  }
+
+  return {
+    taxIdLabel: 'Tax ID / Business Registration No.',
+    taxIdPlaceholder: 'Official tax or business registration number',
+    secondaryTaxLabel: 'Secondary Registration / VAT (Optional)',
+    secondaryTaxPlaceholder: 'Optional secondary registration or tax ID',
+    secondaryTaxRequired: false,
+    routingLabel: 'Routing / IFSC / SWIFT Code',
+    routingPlaceholder: 'Bank routing / IFSC / SWIFT code',
+    accountLabel: 'Account Number / IBAN',
+    accountPlaceholder: 'Bank account number or IBAN',
+    bankPlaceholder: 'Commercial Bank Name',
+  };
+}
+
 export interface CountryBankConfig {
   routingLabel: string;
   routingPlaceholder: string;

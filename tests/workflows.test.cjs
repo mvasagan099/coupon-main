@@ -201,3 +201,43 @@ test('the purchased ticket distinguishes face value from price and uses the coup
  };
  for(const [country,currency] of [['IN','INR'],['US','USD']]){const text=render(country);assert.match(text,new RegExp(`Face Value: ${currency} 500.00`));assert.match(text,new RegExp(`Paid: ${currency} 450.00`));assert.match(text,/Expires: Jan 1, 2099/);}
 });
+
+test('merchant KYC business configuration adapts dynamically per jurisdiction without hardcoding Indian tax IDs', () => {
+  const { getCountryBusinessConfig } = compile(fs.readFileSync(path.join(root, 'src/lib/countries.ts'), 'utf8'), {});
+
+  // India: Mandatory GSTIN and mandatory PAN
+  const inConfig = getCountryBusinessConfig('IN');
+  assert.equal(inConfig.taxIdLabel, 'GSTIN ID');
+  assert.equal(inConfig.secondaryTaxLabel, 'PAN Number');
+  assert.equal(inConfig.secondaryTaxRequired, true);
+  assert.equal(inConfig.routingLabel, 'IFSC Code');
+
+  // United States: EIN required, secondary state tax optional, ACH routing
+  const usConfig = getCountryBusinessConfig('US');
+  assert.match(usConfig.taxIdLabel, /EIN/);
+  assert.equal(usConfig.secondaryTaxRequired, false);
+  assert.match(usConfig.routingLabel, /Routing/);
+
+  // United Kingdom: VAT required, CRN optional, Sort Code
+  const gbConfig = getCountryBusinessConfig('GB');
+  assert.match(gbConfig.taxIdLabel, /VAT/);
+  assert.equal(gbConfig.secondaryTaxRequired, false);
+  assert.match(gbConfig.routingLabel, /Sort Code/);
+
+  // Australia: ABN required, ACN optional, BSB
+  const auConfig = getCountryBusinessConfig('AU');
+  assert.match(auConfig.taxIdLabel, /ABN/);
+  assert.equal(auConfig.secondaryTaxRequired, false);
+  assert.match(auConfig.routingLabel, /BSB/);
+
+  // Global / Fallback: Generic tax ID, optional secondary, routing / SWIFT
+  const globalConfig = getCountryBusinessConfig('CA');
+  assert.match(globalConfig.taxIdLabel, /Tax ID/);
+  assert.equal(globalConfig.secondaryTaxRequired, false);
+
+  // Verify MerchantDashboard uses dynamic business config and does not hardcode mandatory GSTIN/PAN inputs
+  const merchantSource = fs.readFileSync(path.join(root, 'src/pages/MerchantDashboard.tsx'), 'utf8');
+  assert.match(merchantSource, /getCountryBusinessConfig\(onboardingForm\.countryCode\)/);
+  assert.match(merchantSource, /required=\{bizConfig\.secondaryTaxRequired\}/);
+  assert.doesNotMatch(merchantSource, /<label className="label">GSTIN ID<\/label>\s*<input[^>]+required/);
+});

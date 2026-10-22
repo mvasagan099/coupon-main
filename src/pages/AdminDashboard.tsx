@@ -618,7 +618,7 @@ export default function AdminDashboard() {
                         <span className="badge badge-amber">{company.status}</span>
                       </div>
                       <div className="mono" style={{ marginTop: '0.4rem', color: 'var(--text-3)' }}>
-                        {company.gstin || 'GSTIN pending'}
+                        {company.gstin || 'Tax ID pending'}
                       </div>
                     </div>
                   ))}
@@ -701,12 +701,12 @@ export default function AdminDashboard() {
               <h4 style={{ margin: '1.5rem 0 1rem', fontSize: '0.9rem', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>Tax & Compliance (Optional)</h4>
               <div className="responsive-grid-2" style={{ marginBottom: '1.5rem' }}>
                 <div>
-                  <label className="label">GSTIN</label>
-                  <input className="input mono" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} placeholder="15-character GSTIN" />
+                  <label className="label">Tax ID (e.g. GSTIN, EIN, VAT, ABN)</label>
+                  <input className="input mono" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} placeholder="e.g. EIN, VAT, GSTIN, ABN" />
                 </div>
                 <div>
-                  <label className="label">PAN</label>
-                  <input className="input mono" value={form.pan} onChange={(event) => setForm({ ...form, pan: event.target.value.toUpperCase() })} placeholder="10-character PAN" />
+                  <label className="label">Secondary Tax ID / PAN</label>
+                  <input className="input mono" value={form.pan} onChange={(event) => setForm({ ...form, pan: event.target.value.toUpperCase() })} placeholder="e.g. PAN, CRN, TRN, State ID" />
                 </div>
               </div>
 
@@ -714,15 +714,15 @@ export default function AdminDashboard() {
               <div className="responsive-grid-3">
                 <div>
                   <label className="label">Bank Name</label>
-                  <input className="input" value={form.bank_name} onChange={(event) => setForm({ ...form, bank_name: event.target.value })} placeholder="e.g. HDFC Bank" />
+                  <input className="input" value={form.bank_name} onChange={(event) => setForm({ ...form, bank_name: event.target.value })} placeholder="Commercial Bank Name" />
                 </div>
                 <div>
-                  <label className="label">Account Number</label>
-                  <input className="input mono" value={form.account_number} onChange={(event) => setForm({ ...form, account_number: event.target.value.replace(/[^0-9]/g, '') })} placeholder="Digits only" />
+                  <label className="label">Account Number / IBAN</label>
+                  <input className="input mono" value={form.account_number} onChange={(event) => setForm({ ...form, account_number: event.target.value.replace(/[^0-9A-Z]/g, '') })} placeholder="Account Number or IBAN" />
                 </div>
                 <div>
-                  <label className="label">IFSC / Swift Code</label>
-                  <input className="input mono" value={form.ifsc_code} onChange={(event) => setForm({ ...form, ifsc_code: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} />
+                  <label className="label">Routing / IFSC / SWIFT</label>
+                  <input className="input mono" value={form.ifsc_code} onChange={(event) => setForm({ ...form, ifsc_code: event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} placeholder="Routing, IFSC, Sort or SWIFT" />
                 </div>
               </div>
 
@@ -856,11 +856,11 @@ export default function AdminDashboard() {
                           <p className="mono" style={{ margin: 0, color: 'var(--text-1)', fontWeight: 500 }}>{selectedCompany.prefix}</p>
                         </div>
                         <div>
-                          <p style={{ margin: '0 0 0.25rem', fontSize: '0.75rem', color: 'var(--text-4)' }}>GSTIN</p>
+                          <p style={{ margin: '0 0 0.25rem', fontSize: '0.75rem', color: 'var(--text-4)' }}>Tax ID (GSTIN / EIN / VAT)</p>
                           <p className="mono" style={{ margin: 0, color: 'var(--text-1)' }}>{selectedCompany.gstin || 'Not Provided'}</p>
                         </div>
                         <div>
-                          <p style={{ margin: '0 0 0.25rem', fontSize: '0.75rem', color: 'var(--text-4)' }}>PAN</p>
+                          <p style={{ margin: '0 0 0.25rem', fontSize: '0.75rem', color: 'var(--text-4)' }}>Secondary Tax ID / PAN</p>
                           <p className="mono" style={{ margin: 0, color: 'var(--text-1)' }}>{selectedCompany.pan || 'Not Provided'}</p>
                         </div>
                         <div>
@@ -1269,8 +1269,8 @@ export default function AdminDashboard() {
                     </p>
                   </div>
                   <div>
-                    <p className="mono" style={{ margin: 0, fontSize: '0.8rem' }}>GSTIN: {company.gstin || 'None'}</p>
-                    <p className="mono" style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-4)' }}>PAN: {company.pan || 'None'}</p>
+                    <p className="mono" style={{ margin: 0, fontSize: '0.8rem' }}>Tax ID: {company.gstin || 'None'}</p>
+                    <p className="mono" style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-4)' }}>Sec. ID: {company.pan || 'None'}</p>
                   </div>
                   <button className="btn btn-secondary btn-sm" onClick={async () => {
                     try { setViewingDoc(await getMerchantDocumentUrl(company.document_url || '')); }

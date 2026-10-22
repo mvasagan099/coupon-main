@@ -4,7 +4,7 @@ import { DEFAULT_CARD_BACKGROUND, cardBackgroundImage, normalizeCardBackground }
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import CountrySelector from '../components/CountrySelector';
-import { getCountryByCode } from '../lib/countries';
+import { getCountryByCode, getCountryBusinessConfig } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
 import { getDestinationMeta } from '../lib/destinationConfig';
 import { Rocket, Store, AlertCircle, Edit3, Pause, Play, Copy, Trash2, Search, CheckCircle2, Clock, X, Layers, Filter } from 'lucide-react';
@@ -27,6 +27,8 @@ import {
   uploadMerchantDocument,
   getCompanyCoupons,
   merchantGetSettlements,
+  getUserProfileData,
+  updateUserProfile,
 } from '../lib/supabase';
 
 const validSections = ['overview', 'campaigns', 'coupons', 'redemptions', 'settlements', 'onboarding'] as const;
@@ -80,6 +82,7 @@ export default function MerchantDashboard() {
   const [onboardingForm, setOnboardingForm] = useState({
     businessName: '',
     prefix: '',
+    countryCode: 'IN',
     gstin: '',
     pan: '',
     address: '',
@@ -147,8 +150,32 @@ export default function MerchantDashboard() {
 
     try {
       setLoadingCompany(true);
-      const profile = await getCompanyByOwner(userId);
+      const [profile, userProfile] = await Promise.all([
+        getCompanyByOwner(userId),
+        getUserProfileData(userId).catch(() => null),
+      ]);
       setCompany(profile);
+
+      if (userProfile?.country_code) {
+        setOnboardingForm((previous) => ({
+          ...previous,
+          countryCode: userProfile.country_code || previous.countryCode || 'IN',
+        }));
+      }
+
+      if (profile) {
+        setOnboardingForm((previous) => ({
+          ...previous,
+          businessName: profile.name || previous.businessName,
+          prefix: profile.prefix || previous.prefix,
+          gstin: profile.gstin || previous.gstin,
+          pan: profile.pan || previous.pan,
+          address: profile.address || previous.address,
+          bankName: profile.bank_name || previous.bankName,
+          accountNumber: profile.account_number || previous.accountNumber,
+          ifscCode: profile.ifsc_code || previous.ifscCode,
+        }));
+      }
 
       if (profile && profile.status === 'approved') {
         const [cards, transactions, coupons, merchantSettlements] = await Promise.all([
@@ -195,7 +222,10 @@ export default function MerchantDashboard() {
   const handleKycSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (kycStep === 2 && !kycFile) { toastError('Document required', 'Choose your business verification document.'); return; }
+    if (kycStep === 2 && !kycFile && !uploadedDocument) {
+      toastError('Document required', 'Choose your business verification document.');
+      return;
+    }
     if (kycStep < 3) {
       setKycStep((previous) => previous + 1);
       return;
@@ -203,9 +233,21 @@ export default function MerchantDashboard() {
 
     try {
       setLoadingCompany(true);
-      if (!user?.id || !kycFile) throw new Error('A signed-in account and KYC document are required.');
-      const documentPath = uploadedDocument ?? await uploadMerchantDocument(user.id, kycFile);
+      if (!user?.id) throw new Error('A signed-in account is required.');
+      if (!kycFile && !uploadedDocument) throw new Error('A KYC business document is required.');
+
+      const documentPath = uploadedDocument ?? (kycFile ? await uploadMerchantDocument(user.id, kycFile) : '');
       setUploadedDocument(documentPath);
+
+      if (onboardingForm.countryCode) {
+        const cInfo = getCountryByCode(onboardingForm.countryCode);
+        await updateUserProfile(user.id, {
+          country: cInfo.name,
+          country_code: cInfo.code,
+          currency: cInfo.currency,
+        }).catch((err) => console.warn('Could not sync user profile country:', err));
+      }
+
       const payload: Partial<Company> = {
         name: onboardingForm.businessName,
         prefix: onboardingForm.prefix || onboardingForm.businessName.substring(0, 3),
@@ -508,7 +550,7 @@ export default function MerchantDashboard() {
           </div>
 
           <div className="responsive-grid-4">
-            <DashboardCard title="Redeemed value" value={moneySummary(redeemedByCountry)} variant="primary" icon={<span style={{ fontSize: '1rem' }}>₹</span>} />
+            <DashboardCard title="Redeemed value" value={moneySummary(redeemedByCountry)} variant="primary" icon={<Store size={18} />} />
             <DashboardCard title="Coupons redeemed" value={String(metrics.couponsRedeemed)} variant="emerald" icon={<span style={{ fontSize: '1rem' }}>✓</span>} />
             <DashboardCard title="Active campaigns" value={String(metrics.activeOffers)} variant="violet" icon={<span style={{ fontSize: '1rem' }}>🚀</span>} />
             <DashboardCard title="Current status" value={company?.status || 'Not started'} variant="amber" icon={<span style={{ fontSize: '1rem' }}>⚡</span>} />
@@ -1418,59 +1460,137 @@ export default function MerchantDashboard() {
                   {kycStep === 1 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                       <div>
-                        <label className="label">Legal business name</label>
-                        <input className="input" required value={onboardingForm.businessName} onChange={(event) => setOnboardingForm({ ...onboardingForm, businessName: event.target.value })} />
+                        <label className="label">Business jurisdiction / Country *</label>
+                        <CountrySelector
+                          id="merchant-country"
+                          value={onboardingForm.countryCode}
+                          onChange={(country) => setOnboardingForm({ ...onboardingForm, countryCode: country.code })}
+                          required
+                        />
+                        <p className="text-sm" style={{ marginTop: '0.35rem', color: 'var(--text-4)' }}>
+                          Tax identification and banking requirements will automatically adapt to this country.
+                        </p>
                       </div>
                       <div>
-                        <label className="label">Brand prefix</label>
-                        <input className="input mono" required minLength={3} maxLength={3} pattern="[A-Z]{3}" title="Please enter exactly 3 uppercase letters" placeholder="e.g. SBU" value={onboardingForm.prefix} onChange={(event) => setOnboardingForm({ ...onboardingForm, prefix: event.target.value.toUpperCase().replace(/[^A-Z]/g, '') })} />
+                        <label className="label">Legal business name *</label>
+                        <input
+                          className="input"
+                          required
+                          placeholder="e.g. Acme Corporation Ltd"
+                          value={onboardingForm.businessName}
+                          onChange={(event) => setOnboardingForm({ ...onboardingForm, businessName: event.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Brand prefix (3 uppercase letters) *</label>
+                        <input
+                          className="input mono"
+                          required
+                          minLength={3}
+                          maxLength={3}
+                          pattern="[A-Z]{3}"
+                          title="Please enter exactly 3 uppercase letters"
+                          placeholder="e.g. SBU"
+                          value={onboardingForm.prefix}
+                          onChange={(event) => setOnboardingForm({ ...onboardingForm, prefix: event.target.value.toUpperCase().replace(/[^A-Z]/g, '') })}
+                        />
                       </div>
                     </div>
                   )}
 
-                  {kycStep === 2 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <div>
-                          <label className="label">GSTIN ID</label>
-                          <input className="input mono" required value={onboardingForm.gstin} onChange={(event) => setOnboardingForm({ ...onboardingForm, gstin: event.target.value })} />
+                  {kycStep === 2 && (() => {
+                    const bizConfig = getCountryBusinessConfig(onboardingForm.countryCode);
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                          <div>
+                            <label className="label">{bizConfig.taxIdLabel} *</label>
+                            <input
+                              className="input mono"
+                              required
+                              placeholder={bizConfig.taxIdPlaceholder}
+                              value={onboardingForm.gstin}
+                              onChange={(event) => setOnboardingForm({ ...onboardingForm, gstin: event.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <label className="label">{bizConfig.secondaryTaxLabel}{bizConfig.secondaryTaxRequired ? ' *' : ''}</label>
+                            <input
+                              className="input mono"
+                              required={bizConfig.secondaryTaxRequired}
+                              placeholder={bizConfig.secondaryTaxPlaceholder}
+                              value={onboardingForm.pan}
+                              onChange={(event) => setOnboardingForm({ ...onboardingForm, pan: event.target.value })}
+                            />
+                          </div>
                         </div>
                         <div>
-                          <label className="label">PAN</label>
-                          <input className="input mono" required value={onboardingForm.pan} onChange={(event) => setOnboardingForm({ ...onboardingForm, pan: event.target.value })} />
+                          <label className="label">Corporate address *</label>
+                          <input
+                            className="input"
+                            required
+                            placeholder="Registered headquarters or operating address"
+                            value={onboardingForm.address}
+                            onChange={(event) => setOnboardingForm({ ...onboardingForm, address: event.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Business registration / KYC document *</label>
+                          <input
+                            className="input"
+                            type="file"
+                            accept="application/pdf,image/jpeg,image/png"
+                            required={!kycFile && !uploadedDocument}
+                            onChange={(event) => { setKycFile(event.target.files?.[0] ?? null); setUploadedDocument(null); }}
+                          />
+                          <p className="text-sm">
+                            {kycFile && <>Selected: {kycFile.name}. </>}
+                            Upload certificate of incorporation, business license, or tax certificate (PDF, JPG or PNG, up to 5 MB).
+                          </p>
                         </div>
                       </div>
-                      <div>
-                        <label className="label">Corporate address</label>
-                        <input className="input" required value={onboardingForm.address} onChange={(event) => setOnboardingForm({ ...onboardingForm, address: event.target.value })} />
-                      </div>
-                      <div>
-                        <label className="label">KYC document</label>
-                        <input className="input" type="file" accept="application/pdf,image/jpeg,image/png" required={!kycFile}
-                          onChange={(event) => { setKycFile(event.target.files?.[0] ?? null); setUploadedDocument(null); }} />
-                        <p className="text-sm">{kycFile && <>Selected: {kycFile.name}. </>}Private PDF, JPG or PNG, up to 5 MB. Only you and authorized administrators can access it.</p>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
-                  {kycStep === 3 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                      <div>
-                        <label className="label">Settlement bank name</label>
-                        <input className="input" required value={onboardingForm.bankName} onChange={(event) => setOnboardingForm({ ...onboardingForm, bankName: event.target.value })} />
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  {kycStep === 3 && (() => {
+                    const bizConfig = getCountryBusinessConfig(onboardingForm.countryCode);
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                         <div>
-                          <label className="label">Account number</label>
-                          <input className="input mono" required value={onboardingForm.accountNumber} onChange={(event) => setOnboardingForm({ ...onboardingForm, accountNumber: event.target.value })} />
+                          <label className="label">Settlement bank name *</label>
+                          <input
+                            className="input"
+                            required
+                            placeholder={bizConfig.bankPlaceholder}
+                            value={onboardingForm.bankName}
+                            onChange={(event) => setOnboardingForm({ ...onboardingForm, bankName: event.target.value })}
+                          />
                         </div>
-                        <div>
-                          <label className="label">IFSC or Swift</label>
-                          <input className="input mono" required value={onboardingForm.ifscCode} onChange={(event) => setOnboardingForm({ ...onboardingForm, ifscCode: event.target.value })} />
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                          <div>
+                            <label className="label">{bizConfig.accountLabel} *</label>
+                            <input
+                              className="input mono"
+                              required
+                              placeholder={bizConfig.accountPlaceholder}
+                              value={onboardingForm.accountNumber}
+                              onChange={(event) => setOnboardingForm({ ...onboardingForm, accountNumber: event.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <label className="label">{bizConfig.routingLabel} *</label>
+                            <input
+                              className="input mono"
+                              required
+                              placeholder={bizConfig.routingPlaceholder}
+                              value={onboardingForm.ifscCode}
+                              onChange={(event) => setOnboardingForm({ ...onboardingForm, ifscCode: event.target.value })}
+                            />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem' }}>
                     {kycStep > 1 ? (
@@ -1500,8 +1620,8 @@ export default function MerchantDashboard() {
                 <div style={{ display: 'grid', gap: '0.85rem' }}>
                   <div><strong>Business name:</strong> {company.name}</div>
                   <div><strong>Prefix:</strong> <span className="mono">{company.prefix}</span></div>
-                  <div><strong>GSTIN:</strong> <span className="mono">{company.gstin || 'Not provided'}</span></div>
-                  <div><strong>PAN:</strong> <span className="mono">{company.pan || 'Not provided'}</span></div>
+                  <div><strong>Tax ID / GSTIN:</strong> <span className="mono">{company.gstin || 'Not provided'}</span></div>
+                  <div><strong>Secondary ID / PAN:</strong> <span className="mono">{company.pan || 'Not provided'}</span></div>
                   <div><strong>Address:</strong> {company.address || 'Not provided'}</div>
                 </div>
               </div>
@@ -1512,7 +1632,7 @@ export default function MerchantDashboard() {
                 <div style={{ display: 'grid', gap: '0.85rem' }}>
                   <div><strong>Bank:</strong> {company.bank_name || 'Not provided'}</div>
                   <div><strong>Account:</strong> <span className="mono">{company.account_number || 'Not provided'}</span></div>
-                  <div><strong>IFSC / Swift:</strong> <span className="mono">{company.ifsc_code || 'Not provided'}</span></div>
+                  <div><strong>Routing / IFSC / SWIFT:</strong> <span className="mono">{company.ifsc_code || 'Not provided'}</span></div>
                   <div><strong>Document:</strong> <span className="mono">{company.document_url || 'Not provided'}</span></div>
                 </div>
               </div>
