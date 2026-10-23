@@ -39,7 +39,7 @@ import {
 } from '../lib/supabase';
 import CountrySelector from '../components/CountrySelector';
 import type { CountryInfo } from '../lib/countries';
-import { getCountryByCode, getCountryBankConfig, getPreferredGateway } from '../lib/countries';
+import { getCountryByCode, getCountryBankConfig, getPreferredGateway, getCurrencySymbolForCountry } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
 import { getDestinationMeta } from '../lib/destinationConfig';
 
@@ -75,6 +75,42 @@ function getMonogram(name?: string): string {
     return (words[0][0] + words[1][0]).substring(0, 2);
   }
   return clean.substring(0, 2);
+}
+
+export interface PriceTierConfig {
+  lowMax: number;
+  midMax: number;
+  lowLabel: string;
+  midLabel: string;
+  highLabel: string;
+}
+
+export function getPriceFilterTiers(currency: string, currencySymbol: string): PriceTierConfig {
+  if (currency === 'INR') {
+    return {
+      lowMax: 500,
+      midMax: 2000,
+      lowLabel: `Under ${currencySymbol}500`,
+      midLabel: `${currencySymbol}500 - ${currencySymbol}2,000`,
+      highLabel: `Over ${currencySymbol}2,000`,
+    };
+  }
+  if (currency === 'AED') {
+    return {
+      lowMax: 100,
+      midMax: 500,
+      lowLabel: `Under ${currencySymbol} 100`,
+      midLabel: `${currencySymbol} 100 - ${currencySymbol} 500`,
+      highLabel: `Over ${currencySymbol} 500`,
+    };
+  }
+  return {
+    lowMax: 25,
+    midMax: 100,
+    lowLabel: `Under ${currencySymbol}25`,
+    midLabel: `${currencySymbol}25 - ${currencySymbol}100`,
+    highLabel: `Over ${currencySymbol}100`,
+  };
 }
 
 export default function UserDashboard() {
@@ -161,6 +197,11 @@ export default function UserDashboard() {
   const [savingProfile, setSavingProfile]     = useState(false);
   const [activeVoucher, setActiveVoucher] = useState<Coupon | null>(null);
   const [visibleCodes, setVisibleCodes] = useState<Record<string, boolean>>({});
+
+  const priceTiers = useMemo(() => {
+    const sym = profileCountry?.currencySymbol || (userCountryCode ? getCurrencySymbolForCountry(userCountryCode) : '$');
+    return getPriceFilterTiers(userCurrency, sym);
+  }, [userCurrency, profileCountry, userCountryCode]);
 
   useEffect(() => {
     if (!section) {
@@ -655,14 +696,14 @@ export default function UserDashboard() {
         (card.company_name && card.company_name.toLowerCase().includes(catalogSearch.toLowerCase()));
 
       let matchesPrice = true;
-      if (priceFilter === 'low') matchesPrice = card.price < 500;
-      else if (priceFilter === 'mid') matchesPrice = card.price >= 500 && card.price <= 2000;
-      else if (priceFilter === 'high') matchesPrice = card.price > 2000;
+      if (priceFilter === 'low') matchesPrice = card.price < priceTiers.lowMax;
+      else if (priceFilter === 'mid') matchesPrice = card.price >= priceTiers.lowMax && card.price <= priceTiers.midMax;
+      else if (priceFilter === 'high') matchesPrice = card.price > priceTiers.midMax;
 
       return !!userCountryCode && card.country_code === userCountryCode && card.is_active !== false &&
         (!card.expiry_date || new Date(card.expiry_date).getTime() > now) && matchesSearch && matchesPrice;
     });
-  }, [catalogSearch, giftCards, priceFilter, userCountryCode, now]);
+  }, [catalogSearch, giftCards, priceFilter, priceTiers, userCountryCode, now]);
 
   const totalDepositPages = Math.ceil(deposits.length / ITEMS_PER_PAGE);
   const slicedDeposits = deposits.slice(
@@ -801,11 +842,16 @@ export default function UserDashboard() {
                 onChange={(event) => { setCatalogSearch(event.target.value); setMarketplacePage(1); }}
               />
             </div>
-            <select className="input" style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }} value={priceFilter} onChange={(event) => { setPriceFilter(event.target.value); setMarketplacePage(1); }}>
+            <select
+              className="input"
+              style={{ width: 'auto', borderRadius: '99px', padding: '0.8rem 1.25rem', backgroundColor: 'var(--surface-soft)' }}
+              value={priceFilter}
+              onChange={(event) => { setPriceFilter(event.target.value); setMarketplacePage(1); }}
+            >
               <option value="All">All prices</option>
-              <option value="low">Under 500</option>
-              <option value="mid">500 - 2000</option>
-              <option value="high">Over 2000</option>
+              <option value="low">{priceTiers.lowLabel}</option>
+              <option value="mid">{priceTiers.midLabel}</option>
+              <option value="high">{priceTiers.highLabel}</option>
             </select>
           </div>
 

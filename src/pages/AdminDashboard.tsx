@@ -34,7 +34,7 @@ import {
   adminSetCompanyDestination,
 } from '../lib/supabase';
 
-import { COUNTRIES, getCountryByCode } from '../lib/countries';
+import { COUNTRIES, getCountryByCode, getCurrencyForCountry } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
 import { DESTINATIONS, getDestinationMeta } from '../lib/destinationConfig';
 import type { RedemptionDestination } from '../lib/destinationConfig';
@@ -385,9 +385,36 @@ export default function AdminDashboard() {
     });
   }, [couponFilter, couponSearch, purchasedCoupons]);
 
-  const platformGtv = useMemo(() => {
-    return purchasedCoupons.reduce((sum, coupon) => sum + (coupon.price || 0), 0);
-  }, [purchasedCoupons]);
+  const getOfferCurrency = useCallback((offer: GiftCard): string => {
+    if (offer.currency) return offer.currency;
+    if (offer.country_code) return getCurrencyForCountry(offer.country_code);
+    const matchCompany = companies.find((c) => c.id === offer.company_id || c.name === offer.company_name);
+    if (matchCompany?.country_code) return getCurrencyForCountry(matchCompany.country_code);
+    return 'INR';
+  }, [companies]);
+
+  const getCouponCurrency = useCallback((coupon: AdminPurchasedCoupon): string => {
+    if (coupon.currency) return coupon.currency;
+    if (coupon.country_code) return getCurrencyForCountry(coupon.country_code);
+    const matchOffer = offers.find((o) => o.company_name === coupon.company_name);
+    if (matchOffer?.currency) return matchOffer.currency;
+    if (matchOffer?.country_code) return getCurrencyForCountry(matchOffer.country_code);
+    const matchCompany = companies.find((c) => c.name === coupon.company_name);
+    if (matchCompany?.country_code) return getCurrencyForCountry(matchCompany.country_code);
+    return 'INR';
+  }, [offers, companies]);
+
+  const platformGtvSummary = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const coupon of purchasedCoupons) {
+      const curr = getCouponCurrency(coupon);
+      const price = coupon.price ?? (coupon.remaining_balance ? coupon.remaining_balance * 0.9 : 0);
+      totals[curr] = (totals[curr] ?? 0) + price;
+    }
+    const entries = Object.entries(totals).filter(([_, amt]) => amt > 0);
+    if (entries.length === 0) return formatCurrency(0, 'INR');
+    return entries.map(([curr, amt]) => formatCurrency(amt, curr)).join(' · ');
+  }, [purchasedCoupons, getCouponCurrency]);
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -588,7 +615,7 @@ export default function AdminDashboard() {
       </div>
 
       <div className="bento-grid">
-        <DashboardCard title="Platform GTV" value={`₹${platformGtv.toFixed(2)}`} variant="emerald" icon={<TrendingUp size={20} />} />
+        <DashboardCard title="Platform GTV" value={platformGtvSummary} variant="emerald" icon={<TrendingUp size={20} />} />
         <DashboardCard title="Pending approvals" value={String(pendingCompanies.length)} variant="primary" icon={<Clock size={20} />} />
         <DashboardCard title="Partners" value={String(companies.length)} variant="violet" icon={<Building2 size={20} />} />
         <DashboardCard title="Security monitoring" value="Not connected" variant="amber" icon={<ShieldAlert size={20} />} />
@@ -1064,8 +1091,8 @@ export default function AdminDashboard() {
                         })()}
                       </td>
                       <td className="mono" style={{ fontSize: '0.9rem' }}>
-                        <span style={{ color: 'var(--text-3)' }}>Price:</span> ₹{offer.price.toFixed(2)} <br />
-                        <span style={{ color: 'var(--text-3)' }}>Value:</span> ₹{offer.value.toFixed(2)}
+                        <span style={{ color: 'var(--text-3)' }}>Price:</span> {formatCurrency(offer.price, getOfferCurrency(offer))} <br />
+                        <span style={{ color: 'var(--text-3)' }}>Value:</span> {formatCurrency(offer.value, getOfferCurrency(offer))}
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <button
@@ -1221,8 +1248,8 @@ export default function AdminDashboard() {
                           );
                         })()}
                       </td>
-                      <td className="mono">₹{(coupon.value ?? coupon.remaining_balance).toFixed(2)}</td>
-                      <td className="mono">₹{(coupon.price ?? coupon.remaining_balance * 0.9).toFixed(2)}</td>
+                      <td className="mono">{formatCurrency(coupon.value ?? coupon.remaining_balance, getCouponCurrency(coupon))}</td>
+                      <td className="mono">{formatCurrency(coupon.price ?? (coupon.remaining_balance * 0.9), getCouponCurrency(coupon))}</td>
                       <td style={{ color: 'var(--text-3)' }}>{coupon.user_email || 'anonymous'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <span className={`badge ${coupon.is_used ? 'badge-cyan' : 'badge-green'}`}>{coupon.is_used ? 'Redeemed' : 'Active'}</span>

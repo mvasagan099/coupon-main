@@ -1,4 +1,5 @@
 import { normalizeCardBackground } from './cardBackgrounds';
+import { getCurrencyForCountry } from './countries';
 // src/lib/supabase.ts
 import { createClient, FunctionsHttpError } from "@supabase/supabase-js";
 
@@ -60,6 +61,7 @@ export interface Company {
   document_url?: string;
   owner_id?: string;
   logo_url?: string;
+  country_code?: string | null;
   redemption_destination?: RedemptionDestination | null;
 }
 
@@ -127,7 +129,7 @@ export interface Coupon {
   expiry_date: string;
   status: 'active' | 'redeemed' | 'expired';
   redeemed_at?: string;
-  country_code?: string;
+  country_code?: string | null;
   amount?: number;
   redemption_destination?: RedemptionDestination | null;
 }
@@ -188,6 +190,8 @@ export interface AdminPurchasedCoupon {
   status: string;
   price?: number;
   value?: number;
+  country_code?: string | null;
+  currency?: string;
 }
 
 export interface Settlement {
@@ -589,7 +593,7 @@ export interface UpdateGiftCardInput {
   price?: number;
   value?: number;
   expiry_date?: string;
-  country_code?: string;
+  country_code?: string | null;
   banner_image?: string;
   issue_limit?: number | null;
   is_active?: boolean;
@@ -1138,7 +1142,9 @@ export async function adminGetPurchasedCoupons(page: number = 0, pageSize: numbe
         remaining_balance: c.remaining_balance,
         status: c.status,
         price: gc ? gc.price : c.remaining_balance * 0.9,
-        value: gc ? gc.value : c.remaining_balance
+        value: gc ? gc.value : c.remaining_balance,
+        country_code: c.country_code || gc?.country_code,
+        currency: gc?.currency || (c.country_code ? getCurrencyForCountry(c.country_code) : undefined)
       };
     });
   }
@@ -1339,7 +1345,7 @@ export async function updateUserProfile(
   userId: string,
   data: {
     country?: string;
-    country_code?: string;
+    country_code?: string | null;
     currency?: string;
     timezone?: string;
     phone_country_code?: string;

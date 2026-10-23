@@ -256,3 +256,37 @@ test('merchant overview card and redemption logs dynamically use local currency 
   assert.match(merchantSource, /-\{countryMoney\(redemption\.amount,\s*couponCountry\)\}/);
   assert.match(merchantSource, /Remaining balance\s*\{countryMoney\(redemption\.remaining_balance_after,\s*couponCountry\)\}/);
 });
+
+test('admin dashboard uses dynamic currency formatting and removes hardcoded rupee symbols', () => {
+  const adminSource = fs.readFileSync(path.join(root, 'src/pages/AdminDashboard.tsx'), 'utf8');
+
+  // Must not have hardcoded ₹ symbol anywhere in AdminDashboard
+  assert.doesNotMatch(adminSource, /₹/, 'AdminDashboard must not hardcode the Indian Rupee symbol');
+
+  // Platform GTV metric card uses platformGtvSummary
+  assert.match(adminSource, /title="Platform GTV"\s+value=\{platformGtvSummary\}/);
+
+  // Campaigns table formats using formatCurrency and getOfferCurrency
+  assert.match(adminSource, /formatCurrency\(offer\.price,\s*getOfferCurrency\(offer\)\)/);
+  assert.match(adminSource, /formatCurrency\(offer\.value,\s*getOfferCurrency\(offer\)\)/);
+
+  // Global voucher audit table formats using formatCurrency and getCouponCurrency
+  assert.match(adminSource, /formatCurrency\(\s*coupon\.value\s*\?\?\s*coupon\.remaining_balance,\s*getCouponCurrency\(coupon\)\s*\)/);
+});
+
+test('marketplace price filter tiers adapt dynamically to user local currency and thresholds', () => {
+  const userSource = fs.readFileSync(path.join(root, 'src/pages/UserDashboard.tsx'), 'utf8');
+
+  // Verify getPriceFilterTiers function exists and handles INR, AED, and USD/international tiers
+  assert.match(userSource, /export function getPriceFilterTiers\(/);
+  assert.match(userSource, /priceTiers\.lowMax/);
+  assert.match(userSource, /priceTiers\.midMax/);
+
+  // Verify dropdown options render from priceTiers instead of hardcoded numbers
+  assert.match(userSource, /<option value="low">\{priceTiers\.lowLabel\}<\/option>/);
+  assert.match(userSource, /<option value="mid">\{priceTiers\.midLabel\}<\/option>/);
+  assert.match(userSource, /<option value="high">\{priceTiers\.highLabel\}<\/option>/);
+
+  // Must not have hardcoded INR thresholds < 500, 500 - 2000 in price filtering
+  assert.doesNotMatch(userSource, /priceFilter === 'low'\) matchesPrice = card\.price < 500/);
+});
