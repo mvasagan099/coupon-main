@@ -11,8 +11,21 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const path = location.pathname;
-  const requestedPath = (location.state as { from?: string } | null)?.from;
-  const returnPath = requestedPath?.startsWith('/') && !requestedPath.startsWith('//') && !requestedPath.startsWith('/login') ? requestedPath : null;
+  const searchParams = new URLSearchParams(location.search);
+  const requestedPath =
+    (location.state as { from?: string } | null)?.from ||
+    searchParams.get('returnPath') ||
+    searchParams.get('from') ||
+    null;
+  const returnPath =
+    requestedPath &&
+    requestedPath.startsWith('/') &&
+    !requestedPath.startsWith('//') &&
+    !requestedPath.startsWith('/login') &&
+    !requestedPath.startsWith('/companylogin') &&
+    !requestedPath.startsWith('/adminlogin')
+      ? requestedPath
+      : null;
   const isCompanyRoute = path.includes('companylogin');
   const isAdminRoute = path.includes('adminlogin');
   const isUserRoute = !isCompanyRoute && !isAdminRoute;
@@ -145,7 +158,9 @@ export function LoginPage() {
           email,
           password,
           options: {
-            emailRedirectTo: `${window.location.origin}/login`,
+            emailRedirectTo: returnPath
+              ? `${window.location.origin}/login?returnPath=${encodeURIComponent(returnPath)}`
+              : `${window.location.origin}/login`,
             data: {
               role,
               country:            selectedCountry?.name ?? null,

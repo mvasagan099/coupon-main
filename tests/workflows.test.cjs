@@ -290,3 +290,20 @@ test('marketplace price filter tiers adapt dynamically to user local currency an
   // Must not have hardcoded INR thresholds < 500, 500 - 2000 in price filtering
   assert.doesNotMatch(userSource, /priceFilter === 'low'\) matchesPrice = card\.price < 500/);
 });
+
+test('login page inspects returnPath query parameter and redirects safe voucher redemption paths', () => {
+  const loginSource = fs.readFileSync(path.join(root, 'src/pages/LoginPage.tsx'), 'utf8');
+
+  // Verify searchParams.get('returnPath') is parsed alongside location.state
+  assert.match(loginSource, /searchParams\.get\(['"]returnPath['"]\)/);
+  assert.match(loginSource, /searchParams\.get\(['"]from['"]\)/);
+
+  // Verify open-redirect protection
+  assert.match(loginSource, /!requestedPath\.startsWith\(['"]\/\/['"]\)/);
+
+  // Verify login loops are blocked
+  assert.match(loginSource, /!requestedPath\.startsWith\(['"]\/login['"]\)/);
+
+  // Verify emailRedirectTo preserves returnPath
+  assert.match(loginSource, /login\?returnPath=\$\{encodeURIComponent\(returnPath\)\}/);
+});
