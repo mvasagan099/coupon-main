@@ -4,7 +4,7 @@ import { DEFAULT_CARD_BACKGROUND, cardBackgroundImage, normalizeCardBackground }
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import CountrySelector from '../components/CountrySelector';
-import { getCountryByCode, getCountryBusinessConfig } from '../lib/countries';
+import { getCountryByCode, getCountryBusinessConfig, getCurrencyForCountry, getCurrencySymbolForCountry } from '../lib/countries';
 import { formatCurrency } from '../lib/exchangeRate';
 import { getDestinationMeta } from '../lib/destinationConfig';
 import { Rocket, Store, AlertCircle, Edit3, Pause, Play, Copy, Trash2, Search, CheckCircle2, Clock, X, Layers, Filter } from 'lucide-react';
@@ -79,6 +79,7 @@ export default function MerchantDashboard() {
   const [kycStep, setKycStep] = useState(1);
   const [kycFile, setKycFile] = useState<File | null>(null);
   const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
+  const [merchantCountryCode, setMerchantCountryCode] = useState<string>('IN');
   const [onboardingForm, setOnboardingForm] = useState({
     businessName: '',
     prefix: '',
@@ -157,6 +158,7 @@ export default function MerchantDashboard() {
       setCompany(profile);
 
       if (userProfile?.country_code) {
+        setMerchantCountryCode(userProfile.country_code);
         setOnboardingForm((previous) => ({
           ...previous,
           countryCode: userProfile.country_code || previous.countryCode || 'IN',
@@ -515,16 +517,35 @@ export default function MerchantDashboard() {
   const merchantHasApproval = company?.status === 'approved';
 
 
-  const countryMoney = (amount: number, country?: string | null) => country
-    ? formatCurrency(amount, getCountryByCode(country).currency) : `${amount.toFixed(2)} (country unset)`;
-  const moneySummary = (totals: Record<string, number>) => Object.entries(totals).map(([country, amount]) => countryMoney(amount, country === 'unset' ? null : country)).join(' · ') || '0';
+  const effectiveCountryCode =
+    merchantCountryCode ||
+    onboardingForm.countryCode ||
+    offers.find(o => o.country_code)?.country_code ||
+    'IN';
+  const merchantCurrency = getCurrencyForCountry(effectiveCountryCode);
+  const merchantCurrencySymbol = getCurrencySymbolForCountry(effectiveCountryCode);
+
+  const countryMoney = (amount: number, country?: string | null) => {
+    const targetCountry = country && country !== 'unset' ? country : effectiveCountryCode;
+    return formatCurrency(amount, getCurrencyForCountry(targetCountry));
+  };
+  const moneySummary = (totals: Record<string, number>) => {
+    const entries = Object.entries(totals).filter(([_, amount]) => amount > 0);
+    return entries.length > 0
+      ? entries.map(([country, amount]) => countryMoney(amount, country)).join(' · ')
+      : formatCurrency(0, merchantCurrency);
+  };
   const redeemedByCountry = useMemo(() => redemptions.reduce<Record<string, number>>((totals, row) => {
-    const coupon = purchasedCoupons.find(c => c.id === row.coupon_id);
-    const country = coupon?.country_code ?? 'unset'; totals[country] = (totals[country] ?? 0) + row.amount; return totals;
-  }, {}), [redemptions, purchasedCoupons]);
+    const coupon = purchasedCoupons.find(c => c.id === row.coupon_id || c.code === row.coupon_code);
+    const country = coupon?.country_code ?? effectiveCountryCode;
+    totals[country] = (totals[country] ?? 0) + row.amount;
+    return totals;
+  }, {}), [redemptions, purchasedCoupons, effectiveCountryCode]);
   const balanceByCountry = useMemo(() => purchasedCoupons.reduce<Record<string, number>>((totals, coupon) => {
-    const country = coupon.country_code ?? 'unset'; totals[country] = (totals[country] ?? 0) + coupon.remaining_balance; return totals;
-  }, {}), [purchasedCoupons]);
+    const country = coupon.country_code ?? effectiveCountryCode;
+    totals[country] = (totals[country] ?? 0) + coupon.remaining_balance;
+    return totals;
+  }, {}), [purchasedCoupons, effectiveCountryCode]);
 
   const recentOffers = useMemo(() => offers.slice(0, 3), [offers]);
   const recentTransactions = useMemo(() => redemptions.slice(0, 5), [redemptions]);
@@ -550,7 +571,12 @@ export default function MerchantDashboard() {
           </div>
 
           <div className="responsive-grid-4">
-            <DashboardCard title="Redeemed value" value={moneySummary(redeemedByCountry)} variant="primary" icon={<Store size={18} />} />
+            <DashboardCard
+              title="Redeemed value"
+              value={moneySummary(redeemedByCountry)}
+              variant="primary"
+              icon={<span style={{ fontSize: '1rem', fontWeight: 700 }}>{merchantCurrencySymbol}</span>}
+            />
             <DashboardCard title="Coupons redeemed" value={String(metrics.couponsRedeemed)} variant="emerald" icon={<span style={{ fontSize: '1rem' }}>✓</span>} />
             <DashboardCard title="Active campaigns" value={String(metrics.activeOffers)} variant="violet" icon={<span style={{ fontSize: '1rem' }}>🚀</span>} />
             <DashboardCard title="Current status" value={company?.status || 'Not started'} variant="amber" icon={<span style={{ fontSize: '1rem' }}>⚡</span>} />
@@ -718,17 +744,23 @@ export default function MerchantDashboard() {
                 </div>
               ) : (
                 <div style={{ display: 'grid', gap: '0.75rem' }}>
-                  {recentTransactions.map((redemption) => (
-                    <div key={redemption.id} className="glass-card" style={{ borderRadius: '16px', padding: '1rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
-                        <strong className="mono" style={{ fontSize: '0.9rem' }}>{redemption.coupon_code || 'COUPON'}</strong>
-                        <span className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>-🪙{redemption.amount.toFixed(2)}</span>
+                  {recentTransactions.map((redemption) => {
+                    const coupon = purchasedCoupons.find(c => c.code === redemption.coupon_code || c.id === redemption.coupon_id);
+                    const couponCountry = coupon?.country_code || effectiveCountryCode;
+                    return (
+                      <div key={redemption.id} className="glass-card" style={{ borderRadius: '16px', padding: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem' }}>
+                          <strong className="mono" style={{ fontSize: '0.9rem' }}>{redemption.coupon_code || 'COUPON'}</strong>
+                          <span className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>
+                            -{countryMoney(redemption.amount, couponCountry)}
+                          </span>
+                        </div>
+                        <div style={{ color: 'var(--text-3)', marginTop: '0.25rem', fontSize: '0.84rem' }}>
+                          Remaining balance {countryMoney(redemption.remaining_balance_after, couponCountry)}
+                        </div>
                       </div>
-                      <div style={{ color: 'var(--text-3)', marginTop: '0.25rem', fontSize: '0.84rem' }}>
-                        Remaining balance 🪙{redemption.remaining_balance_after.toFixed(2)}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1376,7 +1408,8 @@ export default function MerchantDashboard() {
                   </thead>
                   <tbody>
                     {redemptions.map((redemption) => {
-                      const coupon = purchasedCoupons.find(c => c.code === redemption.coupon_code);
+                      const coupon = purchasedCoupons.find(c => c.code === redemption.coupon_code || c.id === redemption.coupon_id);
+                      const couponCountry = coupon?.country_code || effectiveCountryCode;
                       const userName = coupon?.issued_to ? (coupon.issued_to === 'usr_101' ? 'customer@demo.com' : `Customer (${coupon.issued_to.substring(0,8)})`) : 'anonymous';
                       const priorBalance = redemption.amount + redemption.remaining_balance_after;
 
@@ -1386,9 +1419,9 @@ export default function MerchantDashboard() {
                             {userName !== 'anonymous' ? userName : <span style={{ color: 'var(--text-4)', fontStyle: 'italic' }}>Anonymous</span>}
                           </td>
                           <td className="mono" style={{ fontWeight: 700 }}>{redemption.coupon_code || 'COUPON'}</td>
-                          <td className="mono" style={{ color: 'var(--text-3)' }}>{countryMoney(priorBalance, coupon?.country_code)}</td>
-                          <td className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>-{countryMoney(redemption.amount, coupon?.country_code)}</td>
-                          <td className="mono">{countryMoney(redemption.remaining_balance_after, coupon?.country_code)}</td>
+                          <td className="mono" style={{ color: 'var(--text-3)' }}>{countryMoney(priorBalance, couponCountry)}</td>
+                          <td className="mono" style={{ color: 'var(--red)', fontWeight: 700 }}>-{countryMoney(redemption.amount, couponCountry)}</td>
+                          <td className="mono">{countryMoney(redemption.remaining_balance_after, couponCountry)}</td>
                           <td className="mono" style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
                             {new Date(redemption.created_at).toLocaleString()}
                           </td>

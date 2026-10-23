@@ -241,3 +241,18 @@ test('merchant KYC business configuration adapts dynamically per jurisdiction wi
   assert.match(merchantSource, /required=\{bizConfig\.secondaryTaxRequired\}/);
   assert.doesNotMatch(merchantSource, /<label className="label">GSTIN ID<\/label>\s*<input[^>]+required/);
 });
+
+test('merchant overview card and redemption logs dynamically use local currency symbols without emoji coins or hardcoded rupee', () => {
+  const merchantSource = fs.readFileSync(path.join(root, 'src/pages/MerchantDashboard.tsx'), 'utf8');
+
+  // Verify coin emoji is completely removed from redemption logs and elsewhere in merchant dashboard
+  assert.doesNotMatch(merchantSource, /🪙/, 'MerchantDashboard must not use the coin emoji');
+
+  // Verify the redeemed value metric card does not hardcode ₹ and uses dynamic merchantCurrencySymbol
+  assert.doesNotMatch(merchantSource, /title="Redeemed value"[^>]*icon=\{<span[^>]*>₹<\/span>\}/);
+  assert.match(merchantSource, /title="Redeemed value"[\s\S]*?icon=\{<span[^>]*>\{merchantCurrencySymbol\}<\/span>\}/);
+
+  // Verify recent transactions format using countryMoney instead of -🪙
+  assert.match(merchantSource, /-\{countryMoney\(redemption\.amount,\s*couponCountry\)\}/);
+  assert.match(merchantSource, /Remaining balance\s*\{countryMoney\(redemption\.remaining_balance_after,\s*couponCountry\)\}/);
+});
