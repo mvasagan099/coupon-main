@@ -13,10 +13,16 @@ before(() => {
 });
 after(() => fs.rmSync(output, { recursive: true, force: true }));
 test('legacy build replaces obsolete application assets with only redirect resources', () => {
-  assert.deepEqual(fs.readdirSync(output).sort(), ['index.html', 'redirect.css', 'redirect.js']);
+  assert.deepEqual(fs.readdirSync(output).sort(), ['assets', 'index.html', 'redirect.css', 'redirect.js']);
   const html = fs.readFileSync(path.join(output, 'index.html'), 'utf8');
   assert.match(html, /http-equiv="Content-Security-Policy"/);
   assert.doesNotMatch(html, /\son\w+=|unsafe-inline|localhost|supabase\.co/i);
+  const retired = require('../scripts/legacy-retired-assets.json');
+  for (const asset of retired) {
+    const contents = fs.readFileSync(path.join(output, asset), 'utf8');
+    assert.equal(contents, fs.readFileSync(path.join(output, 'redirect.js'), 'utf8'));
+    assert.doesNotMatch(contents, /localhost:4000|ghoiannrniscrxedyzws|Bearer/);
+  }
   assert.match(html, /<a href="https:\/\/coupon-frontend-e8b3\.onrender\.com\/">/);
 });
 function redirect(pathname, search = '', hash = '') {

@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 // This build is used only by coupon-5mul. The main app keeps its normal Vite build.
@@ -19,11 +19,19 @@ await writeFile(resolve(output, 'index.html'), `<!doctype html>
 <body><main><h1>Continue to CouponVault</h1>
 <p>Opening the secure CouponVault application…</p>
 <a href="${primary}">Continue to CouponVault</a></main></body></html>\n`);
-await writeFile(resolve(output, 'redirect.js'), `// Preserve links without allowing the incoming path to change the destination host.
+const redirectScript = `// Preserve links without allowing the incoming path to change the destination host.
 const destination = new URL(${JSON.stringify(primary)});
 destination.pathname = window.location.pathname;
 destination.search = window.location.search;
 destination.hash = window.location.hash;
 window.location.replace(destination.href);
-`);
+`;
+await writeFile(resolve(output, 'redirect.js'), redirectScript);
+// Render can retain old hashed asset URLs across deploys. Overwrite known retired files.
+const retiredAssets = JSON.parse(await readFile(new URL('./legacy-retired-assets.json', import.meta.url), 'utf8'));
+await mkdir(resolve(output, 'assets'), { recursive: true });
+for (const asset of retiredAssets) {
+  if (!/^assets\/[A-Za-z0-9_-]+\.js$/.test(asset)) throw new Error('Invalid retired asset path');
+  await writeFile(resolve(output, asset), redirectScript);
+}
 await writeFile(resolve(output, 'redirect.css'), 'body{margin:0;min-height:100vh;display:grid;place-items:center;background:#11111b;color:#f5f5fa;font:18px/1.5 system-ui,sans-serif}main{max-width:36rem;padding:2rem}a{color:#b9a4ff}h1{font-size:2rem}\n');
